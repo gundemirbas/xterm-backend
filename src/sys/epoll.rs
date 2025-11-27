@@ -7,7 +7,7 @@ const SYS_EPOLL_WAIT: usize = 232;
 
 pub const EPOLLIN: u32 = 0x001;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 #[repr(C)]
 pub struct EpollEvent {
     pub events: u32,
@@ -22,11 +22,6 @@ impl EpollEvent {
     }
     pub fn fd(&self) -> usize {
         self.data as usize
-    }
-}
-impl Default for EpollEvent {
-    fn default() -> Self {
-        Self { events: 0, data: 0 }
     }
 }
 

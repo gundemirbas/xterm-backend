@@ -19,37 +19,27 @@ pub fn sha1(msg: &[u8], out: &mut [u8; 20]) {
             block[bi] = 0x80;
             bi += 1;
             if bi > 56 {
-                for k in bi..64 {
-                    block[k] = 0;
-                }
+                block[bi..64].fill(0);
                 sha1_block(&mut h0, &mut h1, &mut h2, &mut h3, &mut h4, &block);
-                for k in 0..56 {
-                    block[k] = 0;
-                }
+                block[..56].fill(0);
             } else {
-                for k in bi..56 {
-                    block[k] = 0;
-                }
+                block[bi..56].fill(0);
             }
             for k in 0..8 {
                 block[56 + k] = ((ml >> (8 * (7 - k))) & 0xFF) as u8;
             }
             sha1_block(&mut h0, &mut h1, &mut h2, &mut h3, &mut h4, &block);
             break;
-        } else {
-            if i == msg.len() {
-                for k in 0..64 {
-                    block[k] = 0;
-                }
-                block[0] = 0x80;
-                for k in 0..8 {
-                    block[56 + k] = ((ml >> (8 * (7 - k))) & 0xFF) as u8;
-                }
-                sha1_block(&mut h0, &mut h1, &mut h2, &mut h3, &mut h4, &block);
-                break;
-            } else {
-                sha1_block(&mut h0, &mut h1, &mut h2, &mut h3, &mut h4, &block);
+        } else if i == msg.len() {
+            block.fill(0);
+            block[0] = 0x80;
+            for k in 0..8 {
+                block[56 + k] = ((ml >> (8 * (7 - k))) & 0xFF) as u8;
             }
+            sha1_block(&mut h0, &mut h1, &mut h2, &mut h3, &mut h4, &block);
+            break;
+        } else {
+            sha1_block(&mut h0, &mut h1, &mut h2, &mut h3, &mut h4, &block);
         }
     }
     out[0..4].copy_from_slice(&h0.to_be_bytes());
@@ -59,6 +49,7 @@ pub fn sha1(msg: &[u8], out: &mut [u8; 20]) {
     out[16..20].copy_from_slice(&h4.to_be_bytes());
 }
 
+#[allow(clippy::needless_range_loop)]
 fn sha1_block(
     h0: &mut u32,
     h1: &mut u32,

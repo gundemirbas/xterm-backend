@@ -48,46 +48,25 @@ pub fn run(ws_fd: usize, pty_fd: usize, child_pid: i32) -> Result<(), &'static s
     loop {
         let n = match epoll::epoll_wait(epfd, &mut events, -1) {
             Ok(v) => v,
-            Err(e) => {
-                // log errno
-                let mut b = [0u8; 64];
-                let mut i = 0usize;
-                let hdr = b"bridge: epoll_wait errno ";
-                for &c in hdr { b[i]=c; i+=1; }
-                let mut nb = itoa::Buffer::new();
-                let s = nb.format((-e) as i64);
-                for &c in s.as_bytes() { if i < b.len() { b[i]=c; i+=1; } }
-                if i < b.len() { b[i]=b'\n'; i+=1; }
-                let _ = fs::write(1, &b[..i]);
+            Err(_) => {
                 result = Err("wait");
                 break;
             }
         };
-        for i in 0..n {
-            let fd = events[i].fd();
+        for event in events.iter().take(n) {
+            let fd = event.fd();
             if fd == sfd {
-                // signal received -> forward SIGINT to child (so shell receives it)
-                let _ = fs::write(1, b"bridge: signalfd readable, forwarding SIGINT to child\n");
                 let _ = crate::sys::pty::kill(child_pid, 2); // SIGINT
                 should_exit = true;
                 break;
             }
             if fd == pty_fd {
+                // SAFETY: buf_ptr is valid mmap'd memory of buf_len bytes
                 let r = match fs::read(pty_fd, unsafe {
                     core::slice::from_raw_parts_mut(buf_ptr, buf_len)
                 }) {
                     Ok(v) => v,
-                    Err(e) => {
-                        // log errno from read
-                        let mut b = [0u8; 64];
-                        let mut i = 0usize;
-                        let hdr = b"bridge: pty read errno ";
-                        for &c in hdr { b[i]=c; i+=1; }
-                        let mut nb = itoa::Buffer::new();
-                        let s = nb.format((-e) as i64);
-                        for &c in s.as_bytes() { if i < b.len() { b[i]=c; i+=1; } }
-                        if i < b.len() { b[i]=b'\n'; i+=1; }
-                        let _ = fs::write(1, &b[..i]);
+                    Err(_) => {
                         result = Err("pty read");
                         should_exit = true;
                         break;
@@ -97,34 +76,20 @@ pub fn run(ws_fd: usize, pty_fd: usize, child_pid: i32) -> Result<(), &'static s
                     should_exit = true;
                     break;
                 }
+                // SAFETY: buf_ptr is valid for `r` bytes as returned by read()
                 let slice = unsafe { core::slice::from_raw_parts(buf_ptr, r) };
-                if let Err(_) = ws::write_binary_frame(ws_fd, slice) {
+                if ws::write_binary_frame(ws_fd, slice).is_err() {
                     result = Err("ws write");
                     should_exit = true;
                     break;
                 }
-                } else if fd == ws_fd {
+            } else if fd == ws_fd {
+                // SAFETY: buf_ptr is valid mmap'd memory of buf_len bytes
                 let r = match net::recv(ws_fd, unsafe {
                     core::slice::from_raw_parts_mut(buf_ptr, buf_len)
                 }) {
                     Ok(v) => v,
-                    Err(e) => {
-                        // e is a negative syscall error; -e is errno number
-                        let errno = -e as i32;
-                        if errno == 104 { // ECONNRESET - client reset/closed connection
-                            let _ = fs::write(1, b"bridge: ws closed by peer (ECONNRESET)\n");
-                        } else {
-                            // log errno from recv
-                            let mut b = [0u8; 64];
-                            let mut i = 0usize;
-                            let hdr = b"bridge: ws recv errno ";
-                            for &c in hdr { b[i]=c; i+=1; }
-                            let mut nb = itoa::Buffer::new();
-                            let s = nb.format(errno as i64);
-                            for &c in s.as_bytes() { if i < b.len() { b[i]=c; i+=1; } }
-                            if i < b.len() { b[i]=b'\n'; i+=1; }
-                            let _ = fs::write(1, &b[..i]);
-                        }
+                    Err(_) => {
                         result = Err("ws read");
                         should_exit = true;
                         break;
@@ -134,9 +99,10 @@ pub fn run(ws_fd: usize, pty_fd: usize, child_pid: i32) -> Result<(), &'static s
                     should_exit = true;
                     break;
                 }
+                // SAFETY: buf_ptr valid for `r` bytes, scratch_ptr valid for scratch_len bytes (both mmap'd)
                 let input = unsafe { core::slice::from_raw_parts(buf_ptr, r) };
                 let out = unsafe { core::slice::from_raw_parts_mut(scratch_ptr, scratch_len) };
-                    match ws::parse_and_unmask_frames(input, out) {
+                match ws::parse_and_unmask_frames(input, out) {
                     Ok(payload) => {
                         // If websocket payload contains a Ctrl-C (0x03), forward SIGINT
                         // directly to the child process instead of relying on terminal
@@ -149,24 +115,10 @@ pub fn run(ws_fd: usize, pty_fd: usize, child_pid: i32) -> Result<(), &'static s
                             }
                         }
                         if saw_sigint {
-                            let _ = fs::write(1, b"bridge: forwarding SIGINT to child\n");
                             let _ = crate::sys::pty::kill(child_pid, 2); // SIGINT
                         } else {
                             // write payload to pty; log errno if write fails
-                            match fs::write(pty_fd, payload) {
-                                Ok(_) => {}
-                                Err(e) => {
-                                    let mut b = [0u8; 64];
-                                    let mut i = 0usize;
-                                    let hdr = b"bridge: pty write errno ";
-                                    for &c in hdr { b[i]=c; i+=1; }
-                                    let mut nb = itoa::Buffer::new();
-                                    let s = nb.format((-e) as i64);
-                                    for &c in s.as_bytes() { if i < b.len() { b[i]=c; i+=1; } }
-                                    if i < b.len() { b[i]=b'\n'; i+=1; }
-                                    let _ = fs::write(1, &b[..i]);
-                                }
-                            }
+                            let _ = fs::write(pty_fd, payload);
                         }
                     }
                     Err("close") => {
@@ -184,18 +136,8 @@ pub fn run(ws_fd: usize, pty_fd: usize, child_pid: i32) -> Result<(), &'static s
 
     let _ = mmap::munmap_free(buf_ptr, buf_len);
     let _ = mmap::munmap_free(scratch_ptr, scratch_len);
-    if sfd != usize::MAX { let _ = fs::close(sfd); }
-
-    // If we are returning an error, write a clearer log message for diagnostics.
-    if let Err(e) = result {
-        // assemble single-buffer message to reduce interleaving
-        let mut b = [0u8; 64];
-        let mut i = 0usize;
-        let hdr = b"bridge: error: ";
-        for &c in hdr { b[i]=c; i+=1; }
-        for &c in e.as_bytes() { if i < b.len() { b[i]=c; i+=1; } }
-        if i < b.len() { b[i]=b'\n'; i+=1; }
-        let _ = fs::write(1, &b[..i]);
+    if sfd != usize::MAX {
+        let _ = fs::close(sfd);
     }
 
     result

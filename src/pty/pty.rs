@@ -1,3 +1,5 @@
+#![allow(clippy::manual_c_str_literals)]
+
 use crate::sys::pty as sys;
 
 pub struct Pty {
@@ -50,7 +52,7 @@ pub fn spawn_sh() -> Result<Pty, &'static str> {
     // parent
     let _ = crate::sys::fs::close(wfd);
     // read 8 bytes from child (prctl errno as i64 le), ignore if fails
-    let mut buf = [0u8;8];
+    let mut buf = [0u8; 8];
     let _ = crate::sys::fs::read(rfd, &mut buf);
     let _ = crate::sys::fs::close(rfd);
     let errno = i64::from_le_bytes(buf);
@@ -60,11 +62,15 @@ pub fn spawn_sh() -> Result<Pty, &'static str> {
         // convert errno to decimal ascii
         let mut n = errno;
         let mut neg = false;
-        if n < 0 { neg = true; n = -n; }
+        if n < 0 {
+            neg = true;
+            n = -n;
+        }
         let mut digs = [0u8; 32];
         let mut di = 0usize;
         if n == 0 {
-            digs[di] = b'0'; di += 1;
+            digs[di] = b'0';
+            di += 1;
         }
         while n > 0 && di < digs.len() {
             digs[di] = b'0' + (n % 10) as u8;
@@ -76,7 +82,7 @@ pub fn spawn_sh() -> Result<Pty, &'static str> {
         }
         while di > 0 {
             di -= 1;
-            let _ = crate::sys::fs::write(1, &digs[di..di+1]);
+            let _ = crate::sys::fs::write(1, &digs[di..di + 1]);
         }
         let _ = crate::sys::fs::write(1, b"\n");
     }
@@ -84,5 +90,8 @@ pub fn spawn_sh() -> Result<Pty, &'static str> {
     // Child did calls to setsid() so its pgid should equal its pid.
     let _ = sys::tcsetpgrp(sfd, pid as i32);
     // If tcsetpgrp fails, continue; we'll log explicit failure where useful elsewhere.
-    Ok(Pty { master_fd: mfd, child_pid: pid as i32 })
+    Ok(Pty {
+        master_fd: mfd,
+        child_pid: pid as i32,
+    })
 }

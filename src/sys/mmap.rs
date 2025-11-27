@@ -10,6 +10,7 @@ pub const MAP_PRIVATE: usize = 0x02;
 pub const MAP_ANONYMOUS: usize = 0x20;
 
 pub fn mmap_alloc(len: usize) -> SysResult<*mut u8> {
+    // SAFETY: mmap syscall with valid parameters for anonymous private mapping
     let r = unsafe {
         syscall6(
             SYS_MMAP,
@@ -21,13 +22,10 @@ pub fn mmap_alloc(len: usize) -> SysResult<*mut u8> {
             0,
         )
     };
-    if r as isize >= 0 {
-        Ok(r as *mut u8)
-    } else {
-        Err(r as isize)
-    }
+    if r >= 0 { Ok(r as *mut u8) } else { Err(r) }
 }
 pub fn munmap_free(ptr: *mut u8, len: usize) -> SysResult<()> {
+    // SAFETY: munmap syscall; caller must ensure ptr/len are from valid mmap
     let r = unsafe { syscall2(SYS_MUNMAP, ptr as usize, len) };
     if r >= 0 { Ok(()) } else { Err(r) }
 }

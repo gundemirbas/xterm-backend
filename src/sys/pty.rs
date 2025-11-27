@@ -1,3 +1,5 @@
+#![allow(clippy::manual_c_str_literals)]
+
 use crate::sys::SysResult;
 use crate::sys::fs::open;
 use crate::sys::syscall::{syscall0, syscall1, syscall2, syscall3};
@@ -110,7 +112,9 @@ pub fn exit(code: i32) -> ! {
     unsafe {
         syscall1(SYS_EXIT, code as usize);
     }
-    loop {}
+    loop {
+        core::hint::spin_loop();
+    }
 }
 pub fn setsid() -> SysResult<()> {
     let r = unsafe { syscall0(SYS_SETSID) };
@@ -139,14 +143,30 @@ pub fn kill(pid: i32, sig: i32) -> SysResult<()> {
 
 pub fn waitpid(pid: i32) -> SysResult<i32> {
     let mut status: i32 = 0;
-    let r = unsafe { crate::sys::syscall::syscall4(SYS_WAIT4, pid as usize, &mut status as *mut _ as usize, 0, 0) };
+    let r = unsafe {
+        crate::sys::syscall::syscall4(
+            SYS_WAIT4,
+            pid as usize,
+            &mut status as *mut _ as usize,
+            0,
+            0,
+        )
+    };
     if r >= 0 { Ok(r as i32) } else { Err(r) }
 }
 
 pub fn waitpid_nohang(pid: i32) -> SysResult<i32> {
     let mut status: i32 = 0;
     const WNOHANG: usize = 1;
-    let r = unsafe { crate::sys::syscall::syscall4(SYS_WAIT4, pid as usize, &mut status as *mut _ as usize, WNOHANG, 0) };
+    let r = unsafe {
+        crate::sys::syscall::syscall4(
+            SYS_WAIT4,
+            pid as usize,
+            &mut status as *mut _ as usize,
+            WNOHANG,
+            0,
+        )
+    };
     if r >= 0 { Ok(r as i32) } else { Err(r) }
 }
 
@@ -154,6 +174,14 @@ pub fn wait_any_nohang() -> SysResult<i32> {
     let mut status: i32 = 0;
     const WNOHANG: usize = 1;
     // pid = -1 (wait for any child) -> pass usize::MAX
-    let r = unsafe { crate::sys::syscall::syscall4(SYS_WAIT4, !0usize, &mut status as *mut _ as usize, WNOHANG, 0) };
+    let r = unsafe {
+        crate::sys::syscall::syscall4(
+            SYS_WAIT4,
+            !0usize,
+            &mut status as *mut _ as usize,
+            WNOHANG,
+            0,
+        )
+    };
     if r >= 0 { Ok(r as i32) } else { Err(r) }
 }

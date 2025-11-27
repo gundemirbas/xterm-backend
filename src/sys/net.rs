@@ -40,7 +40,15 @@ pub fn setsockopt(fd: usize, lvl: usize, opt: usize, val: *const u8, len: usize)
     if r >= 0 { Ok(()) } else { Err(r) }
 }
 pub fn accept_blocking(fd: usize) -> SysResult<(usize, u32)> {
-    let r = unsafe { syscall4(SYS_ACCEPT4, fd, core::ptr::null_mut::<u8>() as usize, 0, SOCK_CLOEXEC) };
+    let r = unsafe {
+        syscall4(
+            SYS_ACCEPT4,
+            fd,
+            core::ptr::null_mut::<u8>() as usize,
+            0,
+            SOCK_CLOEXEC,
+        )
+    };
     if r >= 0 { Ok((r as usize, 0)) } else { Err(r) }
 }
 pub fn send_all(fd: usize, buf: &[u8]) -> SysResult<()> {
@@ -86,7 +94,7 @@ pub fn recv(fd: usize, buf: &mut [u8]) -> SysResult<usize> {
 pub fn tcp_listen(port: u16) -> SysResult<usize> {
     let fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0)?;
     let one: i32 = 1;
-    let _ = setsockopt(
+    setsockopt(
         fd,
         SOL_SOCKET,
         SO_REUSEADDR,

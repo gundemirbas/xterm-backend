@@ -1,5 +1,5 @@
 use crate::sys::SysResult;
-use crate::sys::syscall::{syscall4};
+use crate::sys::syscall::syscall4;
 
 const SYS_RT_SIGPROCMASK: usize = 14;
 const SYS_SIGNALFD4: usize = 289;
