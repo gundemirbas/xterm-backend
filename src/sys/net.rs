@@ -11,6 +11,7 @@ const SYS_RECVFROM: usize = 45;
 
 pub const AF_INET: usize = 2;
 pub const SOCK_STREAM: usize = 1;
+pub const SOCK_CLOEXEC: usize = 524288;
 pub const SOL_SOCKET: usize = 1;
 pub const SO_REUSEADDR: usize = 2;
 
@@ -39,7 +40,7 @@ pub fn setsockopt(fd: usize, lvl: usize, opt: usize, val: *const u8, len: usize)
     if r >= 0 { Ok(()) } else { Err(r) }
 }
 pub fn accept_blocking(fd: usize) -> SysResult<(usize, u32)> {
-    let r = unsafe { syscall4(SYS_ACCEPT4, fd, core::ptr::null_mut::<u8>() as usize, 0, 0) };
+    let r = unsafe { syscall4(SYS_ACCEPT4, fd, core::ptr::null_mut::<u8>() as usize, 0, SOCK_CLOEXEC) };
     if r >= 0 { Ok((r as usize, 0)) } else { Err(r) }
 }
 pub fn send_all(fd: usize, buf: &[u8]) -> SysResult<()> {
@@ -83,7 +84,7 @@ pub fn recv(fd: usize, buf: &mut [u8]) -> SysResult<usize> {
 }
 
 pub fn tcp_listen(port: u16) -> SysResult<usize> {
-    let fd = socket(AF_INET, SOCK_STREAM, 0)?;
+    let fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0)?;
     let one: i32 = 1;
     let _ = setsockopt(
         fd,
@@ -100,5 +101,12 @@ pub fn tcp_listen(port: u16) -> SysResult<usize> {
     };
     bind(fd, &addr as *const _, core::mem::size_of::<SockAddrIn>())?;
     listen(fd, 128)?;
+    // Set close-on-exec on the listening socket so fork+exec'd children
+    // (e.g. spawned shells) do not inherit the listener and keep the
+    // port open after the parent exits.
+    const SYS_FCNTL: usize = 72;
+    const F_SETFD: usize = 2;
+    const FD_CLOEXEC: usize = 1;
+    let _ = unsafe { syscall3(SYS_FCNTL, fd, F_SETFD, FD_CLOEXEC) };
     Ok(fd)
 }

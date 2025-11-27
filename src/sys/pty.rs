@@ -12,6 +12,7 @@ const SYS_IOCTL: usize = 16;
 const TIOCGPTN: usize = 0x80045430;
 const TIOCSPTLCK: usize = 0x40045431;
 const TIOCSCTTY: usize = 0x540E;
+const TIOCSPGRP: usize = 0x5410;
 
 pub fn open_ptmx() -> SysResult<usize> {
     open(b"/dev/ptmx\0".as_ptr(), 0o0002 /*O_RDWR*/, 0)
@@ -90,6 +91,11 @@ pub fn ioctl_set_ctty(fd: usize) -> SysResult<()> {
     if r >= 0 { Ok(()) } else { Err(r) }
 }
 
+pub fn tcsetpgrp(fd: usize, pgrp: i32) -> SysResult<()> {
+    let r = unsafe { syscall3(SYS_IOCTL, fd, TIOCSPGRP, &pgrp as *const _ as usize) };
+    if r >= 0 { Ok(()) } else { Err(r) }
+}
+
 pub fn fork() -> SysResult<i32> {
     let r = unsafe { syscall0(SYS_FORK) };
     if r >= 0 { Ok(r as i32) } else { Err(r) }
@@ -134,5 +140,20 @@ pub fn kill(pid: i32, sig: i32) -> SysResult<()> {
 pub fn waitpid(pid: i32) -> SysResult<i32> {
     let mut status: i32 = 0;
     let r = unsafe { crate::sys::syscall::syscall4(SYS_WAIT4, pid as usize, &mut status as *mut _ as usize, 0, 0) };
+    if r >= 0 { Ok(r as i32) } else { Err(r) }
+}
+
+pub fn waitpid_nohang(pid: i32) -> SysResult<i32> {
+    let mut status: i32 = 0;
+    const WNOHANG: usize = 1;
+    let r = unsafe { crate::sys::syscall::syscall4(SYS_WAIT4, pid as usize, &mut status as *mut _ as usize, WNOHANG, 0) };
+    if r >= 0 { Ok(r as i32) } else { Err(r) }
+}
+
+pub fn wait_any_nohang() -> SysResult<i32> {
+    let mut status: i32 = 0;
+    const WNOHANG: usize = 1;
+    // pid = -1 (wait for any child) -> pass usize::MAX
+    let r = unsafe { crate::sys::syscall::syscall4(SYS_WAIT4, !0usize, &mut status as *mut _ as usize, WNOHANG, 0) };
     if r >= 0 { Ok(r as i32) } else { Err(r) }
 }

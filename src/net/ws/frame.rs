@@ -31,6 +31,15 @@ pub fn parse_and_unmask_frames<'a>(
     }
     let b0 = input[0];
     let b1 = input[1];
+    // diagnostic logging of header bytes
+    let _ = crate::sys::fs::write(1, b"ws: frame hdr: ");
+    let mut tmp = [0u8; 32];
+    let mut ti = 0usize;
+    tmp[ti] = b0; ti += 1;
+    tmp[ti] = b' '; ti += 1;
+    tmp[ti] = b1; ti += 1;
+    tmp[ti] = b'\n'; ti += 1;
+    let _ = crate::sys::fs::write(1, &tmp[..ti]);
     let masked = (b1 & 0x80) != 0;
     let mut idx = 2;
     let mut len: usize = (b1 & 0x7F) as usize;
