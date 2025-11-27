@@ -1,4 +1,4 @@
-use crate::sys::{SysResult};
+use crate::sys::SysResult;
 use crate::sys::syscall::{syscall1, syscall3};
 const SYS_CLOSE: usize = 3;
 const SYS_OPEN: usize = 2;

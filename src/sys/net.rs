@@ -1,4 +1,4 @@
-use crate::sys::{SysResult};
+use crate::sys::SysResult;
 use crate::sys::syscall::{syscall2, syscall3, syscall4, syscall6};
 
 const SYS_SOCKET: usize = 41;
@@ -46,27 +46,57 @@ pub fn send_all(fd: usize, buf: &[u8]) -> SysResult<()> {
     let mut off = 0;
     while off < buf.len() {
         let remaining = &buf[off..];
-        let r = unsafe { syscall6(SYS_SENDTO, fd, remaining.as_ptr() as usize, remaining.len(), 0, 0, 0) };
-        if r < 0 { return Err(r); }
-        if r == 0 { break; }
+        let r = unsafe {
+            syscall6(
+                SYS_SENDTO,
+                fd,
+                remaining.as_ptr() as usize,
+                remaining.len(),
+                0,
+                0,
+                0,
+            )
+        };
+        if r < 0 {
+            return Err(r);
+        }
+        if r == 0 {
+            break;
+        }
         off += r as usize;
     }
     Ok(())
 }
 pub fn recv(fd: usize, buf: &mut [u8]) -> SysResult<usize> {
-    let r = unsafe { syscall6(SYS_RECVFROM, fd, buf.as_mut_ptr() as usize, buf.len(), 0, 0, 0) };
+    let r = unsafe {
+        syscall6(
+            SYS_RECVFROM,
+            fd,
+            buf.as_mut_ptr() as usize,
+            buf.len(),
+            0,
+            0,
+            0,
+        )
+    };
     if r >= 0 { Ok(r as usize) } else { Err(r) }
 }
 
 pub fn tcp_listen(port: u16) -> SysResult<usize> {
     let fd = socket(AF_INET, SOCK_STREAM, 0)?;
     let one: i32 = 1;
-    let _ = setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one as *const _ as *const u8, core::mem::size_of::<i32>())?;
+    let _ = setsockopt(
+        fd,
+        SOL_SOCKET,
+        SO_REUSEADDR,
+        &one as *const _ as *const u8,
+        core::mem::size_of::<i32>(),
+    )?;
     let addr = SockAddrIn {
         sin_family: AF_INET as u16,
         sin_port: port.to_be(),
-        sin_addr: u32::from_be_bytes([0,0,0,0]), // INADDR_ANY
-        sin_zero: [0;8],
+        sin_addr: u32::from_be_bytes([0, 0, 0, 0]), // INADDR_ANY
+        sin_zero: [0; 8],
     };
     bind(fd, &addr as *const _, core::mem::size_of::<SockAddrIn>())?;
     listen(fd, 128)?;

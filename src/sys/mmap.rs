@@ -1,10 +1,10 @@
-use crate::sys::{SysResult};
+use crate::sys::SysResult;
 use crate::sys::syscall::{syscall2, syscall6};
 
 const SYS_MMAP: usize = 9;
 const SYS_MUNMAP: usize = 11;
 
-pub const PROT_READ: usize  = 0x1;
+pub const PROT_READ: usize = 0x1;
 pub const PROT_WRITE: usize = 0x2;
 pub const MAP_PRIVATE: usize = 0x02;
 pub const MAP_ANONYMOUS: usize = 0x20;
@@ -18,10 +18,14 @@ pub fn mmap_alloc(len: usize) -> SysResult<*mut u8> {
             PROT_READ | PROT_WRITE,
             MAP_PRIVATE | MAP_ANONYMOUS,
             usize::MAX,
-            0
+            0,
         )
     };
-    if r as isize >= 0 { Ok(r as *mut u8) } else { Err(r as isize) }
+    if r as isize >= 0 {
+        Ok(r as *mut u8)
+    } else {
+        Err(r as isize)
+    }
 }
 pub fn munmap_free(ptr: *mut u8, len: usize) -> SysResult<()> {
     let r = unsafe { syscall2(SYS_MUNMAP, ptr as usize, len) };
