@@ -1,0 +1,7 @@
+# Ignore Rust build output
+/target/
+
+# Optional: editor/project files
+.vscode/
+.idea/
+.DS_Store
