@@ -1,5 +1,7 @@
 use crate::sys::SysResult;
-use crate::sys::syscall::{syscall2, syscall3, syscall4, syscall6};
+use crate::sys::syscall::{
+    syscall2_checked, syscall3_checked, syscall4_checked, syscall6_checked,
+};
 
 const SYS_SOCKET: usize = 41;
 const SYS_BIND: usize = 49;
@@ -24,51 +26,44 @@ pub struct SockAddrIn {
 }
 
 pub fn socket(domain: usize, ty: usize, proto: usize) -> SysResult<usize> {
-    let r = unsafe { syscall3(SYS_SOCKET, domain, ty, proto) };
-    if r >= 0 { Ok(r as usize) } else { Err(r) }
+    let r = syscall3_checked(SYS_SOCKET, domain, ty, proto)?;
+    Ok(r as usize)
 }
 pub fn bind(fd: usize, addr: *const SockAddrIn, len: usize) -> SysResult<()> {
-    let r = unsafe { syscall3(SYS_BIND, fd, addr as usize, len) };
-    if r >= 0 { Ok(()) } else { Err(r) }
+    let _ = syscall3_checked(SYS_BIND, fd, addr as usize, len)?;
+    Ok(())
 }
 pub fn listen(fd: usize, backlog: usize) -> SysResult<()> {
-    let r = unsafe { syscall2(SYS_LISTEN, fd, backlog) };
-    if r >= 0 { Ok(()) } else { Err(r) }
+    let _ = syscall2_checked(SYS_LISTEN, fd, backlog)?;
+    Ok(())
 }
 pub fn setsockopt(fd: usize, lvl: usize, opt: usize, val: *const u8, len: usize) -> SysResult<()> {
-    let r = unsafe { syscall6(SYS_SETSOCKOPT, fd, lvl, opt, val as usize, len, 0) };
-    if r >= 0 { Ok(()) } else { Err(r) }
+    let _ = syscall6_checked(SYS_SETSOCKOPT, fd, lvl, opt, val as usize, len, 0)?;
+    Ok(())
 }
 pub fn accept_blocking(fd: usize) -> SysResult<(usize, u32)> {
-    let r = unsafe {
-        syscall4(
-            SYS_ACCEPT4,
-            fd,
-            core::ptr::null_mut::<u8>() as usize,
-            0,
-            SOCK_CLOEXEC,
-        )
-    };
-    if r >= 0 { Ok((r as usize, 0)) } else { Err(r) }
+    let r = syscall4_checked(
+        SYS_ACCEPT4,
+        fd,
+        core::ptr::null_mut::<u8>() as usize,
+        0,
+        SOCK_CLOEXEC,
+    )?;
+    Ok((r as usize, 0))
 }
 pub fn send_all(fd: usize, buf: &[u8]) -> SysResult<()> {
     let mut off = 0;
     while off < buf.len() {
         let remaining = &buf[off..];
-        let r = unsafe {
-            syscall6(
-                SYS_SENDTO,
-                fd,
-                remaining.as_ptr() as usize,
-                remaining.len(),
-                0,
-                0,
-                0,
-            )
-        };
-        if r < 0 {
-            return Err(r);
-        }
+        let r = syscall6_checked(
+            SYS_SENDTO,
+            fd,
+            remaining.as_ptr() as usize,
+            remaining.len(),
+            0,
+            0,
+            0,
+        )?;
         if r == 0 {
             break;
         }
@@ -77,18 +72,16 @@ pub fn send_all(fd: usize, buf: &[u8]) -> SysResult<()> {
     Ok(())
 }
 pub fn recv(fd: usize, buf: &mut [u8]) -> SysResult<usize> {
-    let r = unsafe {
-        syscall6(
-            SYS_RECVFROM,
-            fd,
-            buf.as_mut_ptr() as usize,
-            buf.len(),
-            0,
-            0,
-            0,
-        )
-    };
-    if r >= 0 { Ok(r as usize) } else { Err(r) }
+    let r = syscall6_checked(
+        SYS_RECVFROM,
+        fd,
+        buf.as_mut_ptr() as usize,
+        buf.len(),
+        0,
+        0,
+        0,
+    )?;
+    Ok(r as usize)
 }
 
 pub fn tcp_listen(port: u16) -> SysResult<usize> {
@@ -115,6 +108,6 @@ pub fn tcp_listen(port: u16) -> SysResult<usize> {
     const SYS_FCNTL: usize = 72;
     const F_SETFD: usize = 2;
     const FD_CLOEXEC: usize = 1;
-    let _ = unsafe { syscall3(SYS_FCNTL, fd, F_SETFD, FD_CLOEXEC) };
+    let _ = syscall3_checked(SYS_FCNTL, fd, F_SETFD, FD_CLOEXEC)?;
     Ok(fd)
 }
