@@ -1,17 +1,6 @@
 use crate::net::ws;
 use crate::sys::epoll;
-use crate::sys::{fs, mmap, net, signal};
-
-// Helpers to centralize the few unchecked pointer->slice conversions.
-// These wrap `unsafe` calls in one place so the rest of the module can
-// remain free of inline `unsafe` blocks. Callers must ensure the mmap'd
-// memory remains valid for the duration of the slice usage.
-fn as_mut_slice<'a>(ptr: *mut u8, len: usize) -> &'a mut [u8] {
-    unsafe { core::slice::from_raw_parts_mut(ptr, len) }
-}
-fn as_slice<'a>(ptr: *mut u8, len: usize) -> &'a [u8] {
-    unsafe { core::slice::from_raw_parts(ptr, len) }
-}
+use crate::sys::{fs, mmap, net, signal, util};
 
 pub fn run(ws_fd: usize, pty_fd: usize, child_pid: i32) -> Result<(), &'static str> {
     let epfd = epoll::epoll_create1().map_err(|_| "epoll")?;
@@ -73,7 +62,7 @@ pub fn run(ws_fd: usize, pty_fd: usize, child_pid: i32) -> Result<(), &'static s
             }
             if fd == pty_fd {
                 // buf_ptr is mmap'd memory of `buf_len` bytes
-                let r = match fs::read(pty_fd, as_mut_slice(buf_ptr, buf_len)) {
+                let r = match fs::read(pty_fd, util::ptr_to_mut_slice(buf_ptr, buf_len)) {
                     Ok(v) => v,
                     Err(_) => {
                         result = Err("pty read");
@@ -86,7 +75,7 @@ pub fn run(ws_fd: usize, pty_fd: usize, child_pid: i32) -> Result<(), &'static s
                     break;
                 }
                 // buf_ptr is valid for `r` bytes as returned by read()
-                let slice = as_slice(buf_ptr, r);
+                let slice = util::ptr_to_slice(buf_ptr, r);
                 if ws::write_binary_frame(ws_fd, slice).is_err() {
                     result = Err("ws write");
                     should_exit = true;
@@ -94,7 +83,7 @@ pub fn run(ws_fd: usize, pty_fd: usize, child_pid: i32) -> Result<(), &'static s
                 }
             } else if fd == ws_fd {
                 // buf_ptr is mmap'd memory of `buf_len` bytes
-                let r = match net::recv(ws_fd, as_mut_slice(buf_ptr, buf_len)) {
+                let r = match net::recv(ws_fd, util::ptr_to_mut_slice(buf_ptr, buf_len)) {
                     Ok(v) => v,
                     Err(_) => {
                         result = Err("ws read");
@@ -107,8 +96,8 @@ pub fn run(ws_fd: usize, pty_fd: usize, child_pid: i32) -> Result<(), &'static s
                     break;
                 }
                 // buf_ptr valid for `r` bytes, scratch_ptr valid for scratch_len bytes (both mmap'd)
-                let input = as_slice(buf_ptr, r);
-                let out = as_mut_slice(scratch_ptr, scratch_len);
+                let input = util::ptr_to_slice(buf_ptr, r);
+                let out = util::ptr_to_mut_slice(scratch_ptr, scratch_len);
                 match ws::parse_and_unmask_frames(input, out) {
                     Ok(payload) => {
                         // If websocket payload contains a Ctrl-C (0x03), forward SIGINT
