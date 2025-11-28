@@ -1,43 +1,11 @@
-#![no_std]
-#![no_main]
+use crate::r#loop;
+use crate::net;
+use crate::pty;
+use crate::sys;
 
-mod r#loop;
-mod net;
-mod pty;
-mod runtime;
-mod sys;
-mod server;
+static INDEX_HTML: &[u8] = include_bytes!("../assets/terminal.html");
 
-// 1MB stack
-#[unsafe(link_section = ".bss")]
-static mut STACK: [u8; 1024 * 1024] = [0; 1024 * 1024];
-
-#[unsafe(no_mangle)]
-#[allow(static_mut_refs)]
-pub extern "C" fn _start() -> ! {
-    unsafe {
-        let stack_top = STACK.as_ptr().add(STACK.len()) as usize;
-        // Align stack to 16 bytes and switch to it
-        core::arch::asm!(
-            "mov rsp, {stack}",
-            "and rsp, ~0xF",
-            "call {main}",
-            stack = in(reg) stack_top,
-            main = sym main_with_stack,
-            options(noreturn)
-        );
-    }
-}
-
-#[allow(static_mut_refs)]
-fn main_with_stack() -> ! {
-    log(b"start\n");
-    server::server_main();
-    // server_main returned (e.g. due to signal/shutdown). Exit process so children get PDEATHSIG.
-    exit_now(0);
-}
-
-fn server_main() {
+pub fn server_main() {
     log(b"listen begin\n");
     let listen_fd = match sys::net::tcp_listen(8000) {
         Ok(fd) => fd,
@@ -222,7 +190,7 @@ fn server_main() {
                         }
                     }
                 } else {
-                    http::serve_html(fd, INDEX_HTML);
+                    net::http::serve_html(fd, INDEX_HTML);
                 }
             }
         }

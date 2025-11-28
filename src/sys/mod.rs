@@ -8,3 +8,4 @@ pub mod pty;
 pub mod signal;
 pub mod syscall;
 pub mod util;
+pub mod checked;
