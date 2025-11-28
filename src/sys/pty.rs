@@ -3,7 +3,6 @@
 use crate::sys::SysResult;
 use crate::sys::fs::open;
 use crate::sys::syscall::{
-    syscall1, syscall3,
     syscall0_checked, syscall2_checked, syscall3_checked, syscall6_checked,
 };
 
@@ -98,18 +97,17 @@ pub fn fork() -> SysResult<i32> {
     Ok(r as i32)
 }
 pub fn execve(path: *const u8, argv: *const *const u8, envp: *const *const u8) -> ! {
-    unsafe {
-        syscall3(SYS_EXECVE, path as usize, argv as usize, envp as usize);
-    }
-    exit(127);
+    // Use the checked syscall wrapper; execve only returns on error.
+    let _ = crate::sys::syscall::syscall3_checked(SYS_EXECVE, path as usize, argv as usize, envp as usize);
+    // If we get here, execve failed — attempt to exit the process.
+    let _ = crate::sys::syscall::syscall1_checked(SYS_EXIT, 127);
+    loop { core::hint::spin_loop(); }
 }
+#[allow(dead_code)]
 pub fn exit(code: i32) -> ! {
-    unsafe {
-        syscall1(SYS_EXIT, code as usize);
-    }
-    loop {
-        core::hint::spin_loop();
-    }
+    // Use the checked wrapper for the exit syscall and then spin.
+    let _ = crate::sys::syscall::syscall1_checked(SYS_EXIT, code as usize);
+    loop { core::hint::spin_loop(); }
 }
 pub fn setsid() -> SysResult<()> {
     let _ = syscall0_checked(SYS_SETSID)?;
