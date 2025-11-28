@@ -10,3 +10,7 @@
 *.pid
 *.out
 *.md
+
+# Do not track generated reports or runtime logs
+/reports/
+/logs/
