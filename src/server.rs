@@ -4,52 +4,10 @@ use crate::sys;
 mod bridge;
 pub static INDEX_HTML: &[u8] = include_bytes!("../assets/terminal.html");
 
-pub fn server_main() {
-    log(b"listen begin\n");
-    let (listen_fd, epfd, sfd) = setup_listener();
+// The accept loop and signal handling live in `main.rs` now. Server exposes
+// the helper functions used by the bootstrap (listener setup and handlers).
 
-    let mut events = [sys::epoll::EpollEvent::default(); 8];
-    let mut active_workers: i32 = 0;
-    const MAX_WORKERS: i32 = 15;
-    loop {
-        let n = match sys::epoll::epoll_wait(epfd, &mut events, -1) {
-            Ok(v) => v,
-            Err(e) => {
-                log(b"epoll_wait errno: ");
-                log_num(-e as i32);
-                log(b"\n");
-                continue;
-            }
-        };
-        let mut shutdown = false;
-        for event in events.iter().take(n) {
-            let fd = event.fd();
-            if fd == sfd {
-                if handle_signal_event(sfd, &mut active_workers) {
-                    shutdown = true;
-                    break;
-                }
-                continue;
-            }
-            if fd == listen_fd
-                && handle_listener_event(listen_fd, &mut active_workers, MAX_WORKERS, sfd, epfd)
-                    .is_err()
-            {
-                // errors are logged inside handler; continue accepting
-                continue;
-            }
-        }
-        if shutdown {
-            break;
-        }
-    }
-    let _ = sys::fs::close(listen_fd);
-    if sfd != usize::MAX {
-        let _ = sys::fs::close(sfd);
-    }
-}
-
-fn setup_listener() -> (usize, usize, usize) {
+pub(crate) fn setup_listener() -> (usize, usize, usize) {
     log(b"listen begin\n");
     let listen_fd = match sys::net::tcp_listen(8000) {
         Ok(fd) => fd,
@@ -84,7 +42,7 @@ fn setup_listener() -> (usize, usize, usize) {
     (listen_fd, epfd, sfd)
 }
 
-fn handle_signal_event(sfd: usize, active_workers: &mut i32) -> bool {
+pub(crate) fn handle_signal_event(sfd: usize, active_workers: &mut i32) -> bool {
     // returns true if shutdown requested
     let mut info = [0u8; 128];
     if let Ok(r) = sys::fs::read(sfd, &mut info)
@@ -120,7 +78,7 @@ fn handle_signal_event(sfd: usize, active_workers: &mut i32) -> bool {
     false
 }
 
-fn handle_listener_event(
+pub(crate) fn handle_listener_event(
     listen_fd: usize,
     active_workers: &mut i32,
     max_workers: i32,
@@ -222,7 +180,7 @@ pub(crate) fn log(msg: &[u8]) {
 }
 
 #[inline(always)]
-fn log_num(mut n: i32) {
+pub(crate) fn log_num(mut n: i32) {
     if n == 0 {
         log(b"0");
         return;

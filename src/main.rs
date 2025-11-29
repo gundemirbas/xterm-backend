@@ -9,7 +9,53 @@ mod sys;
 
 fn main() -> ! {
     crate::server::log(b"start\n");
-    crate::server::server_main();
+    let (listen_fd, epfd, sfd) = crate::server::setup_listener();
+
+    let mut events = [crate::sys::epoll::EpollEvent::default(); 8];
+    let mut active_workers: i32 = 0;
+    const MAX_WORKERS: i32 = 15;
+    loop {
+        let n = match crate::sys::epoll::epoll_wait(epfd, &mut events, -1) {
+            Ok(v) => v,
+            Err(e) => {
+                crate::server::log(b"epoll_wait errno: ");
+                crate::server::log_num(-e as i32);
+                crate::server::log(b"\n");
+                continue;
+            }
+        };
+        let mut shutdown = false;
+        for event in events.iter().take(n) {
+            let fd = event.fd();
+            if fd == sfd {
+                if crate::server::handle_signal_event(sfd, &mut active_workers) {
+                    shutdown = true;
+                    break;
+                }
+                continue;
+            }
+            if fd == listen_fd
+                && crate::server::handle_listener_event(
+                    listen_fd,
+                    &mut active_workers,
+                    MAX_WORKERS,
+                    sfd,
+                    epfd,
+                )
+                .is_err()
+            {
+                // errors are logged inside handler; continue accepting
+                continue;
+            }
+        }
+        if shutdown {
+            break;
+        }
+    }
+    let _ = crate::sys::fs::close(listen_fd);
+    if sfd != usize::MAX {
+        let _ = crate::sys::fs::close(sfd);
+    }
     // server_main returned (e.g. due to signal/shutdown). Exit process so children get PDEATHSIG.
     crate::server::exit_now(0);
 }
