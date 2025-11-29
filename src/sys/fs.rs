@@ -1,5 +1,5 @@
+use crate::runtime::syscall::{syscall1_checked, syscall3_checked};
 use crate::sys::SysResult;
-use crate::sys::syscall::{syscall1_checked, syscall3_checked};
 const SYS_CLOSE: usize = 3;
 const SYS_OPEN: usize = 2;
 const SYS_READ: usize = 0;

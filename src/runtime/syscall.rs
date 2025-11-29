@@ -7,7 +7,7 @@
 //! - Arguments match the syscall ABI (type, ownership, lifetimes)
 //! - Pointers reference valid memory for the duration of the syscall
 
-use crate::sys::SysResult;
+pub type SysResult<T> = core::result::Result<T, isize>;
 use core::arch::asm;
 
 /// # Safety
@@ -96,13 +96,7 @@ pub fn syscall3_checked(n: usize, a0: usize, a1: usize, a2: usize) -> SysResult<
     let r = unsafe { syscall3(n, a0, a1, a2) };
     if r >= 0 { Ok(r) } else { Err(r) }
 }
-pub fn syscall4_checked(
-    n: usize,
-    a0: usize,
-    a1: usize,
-    a2: usize,
-    a3: usize,
-) -> SysResult<isize> {
+pub fn syscall4_checked(n: usize, a0: usize, a1: usize, a2: usize, a3: usize) -> SysResult<isize> {
     let r = unsafe { syscall4(n, a0, a1, a2, a3) };
     if r >= 0 { Ok(r) } else { Err(r) }
 }

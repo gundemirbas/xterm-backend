@@ -1,10 +1,10 @@
 #![allow(clippy::manual_c_str_literals)]
 
-use crate::sys::SysResult;
-use crate::sys::fs::open;
-use crate::sys::syscall::{
+use crate::runtime::syscall::{
     syscall0_checked, syscall2_checked, syscall3_checked, syscall6_checked,
 };
+use crate::sys::SysResult;
+use crate::sys::fs::open;
 
 const SYS_FORK: usize = 57;
 const SYS_EXECVE: usize = 59;
@@ -98,16 +98,25 @@ pub fn fork() -> SysResult<i32> {
 }
 pub fn execve(path: *const u8, argv: *const *const u8, envp: *const *const u8) -> ! {
     // Use the checked syscall wrapper; execve only returns on error.
-    let _ = crate::sys::syscall::syscall3_checked(SYS_EXECVE, path as usize, argv as usize, envp as usize);
+    let _ = crate::runtime::syscall::syscall3_checked(
+        SYS_EXECVE,
+        path as usize,
+        argv as usize,
+        envp as usize,
+    );
     // If we get here, execve failed — attempt to exit the process.
-    let _ = crate::sys::syscall::syscall1_checked(SYS_EXIT, 127);
-    loop { core::hint::spin_loop(); }
+    let _ = crate::runtime::syscall::syscall1_checked(SYS_EXIT, 127);
+    loop {
+        core::hint::spin_loop();
+    }
 }
 #[allow(dead_code)]
 pub fn exit(code: i32) -> ! {
     // Use the checked wrapper for the exit syscall and then spin.
-    let _ = crate::sys::syscall::syscall1_checked(SYS_EXIT, code as usize);
-    loop { core::hint::spin_loop(); }
+    let _ = crate::runtime::syscall::syscall1_checked(SYS_EXIT, code as usize);
+    loop {
+        core::hint::spin_loop();
+    }
 }
 pub fn setsid() -> SysResult<()> {
     let _ = syscall0_checked(SYS_SETSID)?;
@@ -136,7 +145,7 @@ pub fn kill(pid: i32, sig: i32) -> SysResult<()> {
 
 pub fn waitpid(pid: i32) -> SysResult<i32> {
     let mut status: i32 = 0;
-    let r = crate::sys::syscall::syscall4_checked(
+    let r = crate::runtime::syscall::syscall4_checked(
         SYS_WAIT4,
         pid as usize,
         &mut status as *mut _ as usize,
@@ -149,7 +158,7 @@ pub fn waitpid(pid: i32) -> SysResult<i32> {
 pub fn waitpid_nohang(pid: i32) -> SysResult<i32> {
     let mut status: i32 = 0;
     const WNOHANG: usize = 1;
-    let r = crate::sys::syscall::syscall4_checked(
+    let r = crate::runtime::syscall::syscall4_checked(
         SYS_WAIT4,
         pid as usize,
         &mut status as *mut _ as usize,
@@ -163,7 +172,7 @@ pub fn wait_any_nohang() -> SysResult<i32> {
     let mut status: i32 = 0;
     const WNOHANG: usize = 1;
     // pid = -1 (wait for any child) -> pass usize::MAX
-    let r = crate::sys::syscall::syscall4_checked(
+    let r = crate::runtime::syscall::syscall4_checked(
         SYS_WAIT4,
         !0usize,
         &mut status as *mut _ as usize,

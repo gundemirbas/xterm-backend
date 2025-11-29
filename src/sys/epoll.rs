@@ -1,5 +1,5 @@
+use crate::runtime::syscall::{syscall1_checked, syscall4_checked};
 use crate::sys::SysResult;
-use crate::sys::syscall::{syscall1_checked, syscall4_checked};
 
 const SYS_EPOLL_CREATE1: usize = 291;
 const SYS_EPOLL_CTL: usize = 233;

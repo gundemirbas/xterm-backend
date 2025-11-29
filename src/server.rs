@@ -153,7 +153,7 @@ pub fn server_main() {
                                 let _ = sys::fs::close(sfd);
                             }
                             let _ = sys::fs::close(epfd);
-                            
+
                             // child continues below to perform upgrade and run bridge
                         }
                         _ => {
@@ -235,16 +235,5 @@ fn log_num(mut n: i32) {
 
 #[inline(always)]
 pub(crate) fn exit_now(code: i32) -> ! {
-    // SAFETY: exit syscall never returns; trivial inline asm
-    unsafe {
-        core::arch::asm!(
-            "syscall",
-            in("rax") 60usize, // SYS_exit
-            in("rdi") code as usize,
-            lateout("rax") _, clobber_abi("sysv64")
-        );
-    }
-    loop {
-        core::hint::spin_loop();
-    }
+    crate::runtime::exit_now(code)
 }

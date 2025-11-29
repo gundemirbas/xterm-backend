@@ -1,5 +1,5 @@
+use crate::runtime::syscall::{syscall2_checked, syscall6_checked};
 use crate::sys::SysResult;
-use crate::sys::syscall::{syscall2_checked, syscall6_checked};
 
 const SYS_MMAP: usize = 9;
 const SYS_MUNMAP: usize = 11;

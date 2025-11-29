@@ -1,7 +1,7 @@
-use crate::sys::SysResult;
-use crate::sys::syscall::{
+use crate::runtime::syscall::{
     syscall2_checked, syscall3_checked, syscall4_checked, syscall6_checked,
 };
+use crate::sys::SysResult;
 
 const SYS_SOCKET: usize = 41;
 const SYS_BIND: usize = 49;

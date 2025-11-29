@@ -4,18 +4,21 @@ This is a `no_std` Rust xterm backend using raw syscalls for HTTP server, WebSoc
 
 ## Architecture & Components
 
-**Entry & Runtime**
-- `src/runtime/mod.rs`: Custom `_start` entry point with inline asm to align stack (16-byte ABI requirement) before calling `main`
-- `src/main.rs`: Bootstrap only—calls `server::server_main()` then exits
+**Entry & Runtime** (all `unsafe` isolated here)
+- `src/runtime/mod.rs`: Custom `_start` entry point with inline asm to align stack (16-byte ABI requirement), `exit_now` syscall wrapper
+- `src/runtime/syscall.rs`: Raw syscall wrappers with safe checked variants (moved from sys/)
+- `src/runtime/allocator.rs`: Global allocator with atomic bump arena (moved from mem/)
+- `src/runtime/util.rs`: Pointer-to-slice conversion helpers (moved from sys/)
 - `src/runtime/panic.rs`, `src/runtime/shims.rs`: no_std panic handler and compiler builtins
+- `src/main.rs`: Bootstrap only—calls `server::server_main()` then exits
 
 **Server & Process Model**
 - `src/server.rs`: Main accept loop using epoll + signalfd. Forks a worker child per WebSocket connection (fork-per-connection model). Parent reaps children via SIGCHLD and enforces `MAX_WORKERS=15` limit
 - Worker lifecycle: accept → upgrade to WebSocket → spawn PTY shell → run bridge → cleanup & exit
 
 **Memory Management**
-- `src/mem/allocator.rs`: Custom `#[global_allocator]` using atomic bump arena (16 MiB) with mmap fallback. Provides `page_alloc`/`page_free` wrappers for raw buffer allocation
-- `src/sys/mmap.rs`: Raw mmap/munmap syscall wrappers
+- `src/runtime/allocator.rs`: Custom `#[global_allocator]` using atomic bump arena (16 MiB) with mmap fallback. Provides `page_alloc`/`page_free` wrappers for raw buffer allocation
+- `src/sys/mmap.rs`: Safe mmap/munmap wrappers using runtime syscalls
 
 **Network & Protocol**
 - `src/net/http.rs`: Minimal HTTP header parser, detects WebSocket upgrade and `/term` path
@@ -27,7 +30,7 @@ This is a `no_std` Rust xterm backend using raw syscalls for HTTP server, WebSoc
 - `src/loop/bridge.rs`: Epoll loop bridging WebSocket fd ↔ PTY master fd. Handles Ctrl-C detection (0x03 byte) by sending SIGINT to shell child
 
 **System Calls**
-- `src/sys/*`: Raw syscall wrappers (net, fs, epoll, pty, mmap, signal). No libc dependency
+- `src/sys/*`: Safe syscall wrappers (net, fs, epoll, pty, mmap, signal) using runtime syscalls. No libc dependency
 
 ## Build & Run
 
@@ -70,6 +73,11 @@ pkill -f xterm-backend
 
 ## Project Conventions
 
+**Safety & Code Quality (CRITICAL)**
+- `unsafe` code is ONLY allowed in `src/runtime/` directory—all low-level operations (syscalls, allocator, stack alignment) are isolated there
+- Code MUST pass `cargo fmt` without changes and `cargo clippy` without warnings or errors
+- Rest of codebase uses safe abstractions provided by runtime module
+
 **Error Handling**
 - Use `Result<T, &'static str>` with literal error messages: `Err("descriptive msg")`
 - Keep errors terse but meaningful (e.g., `"no key"`, `"fork failed"`, `"ws read"`)
@@ -102,6 +110,6 @@ pkill -f xterm-backend
 
 **Add/modify protocol logic**: `src/net/ws/{handshake,frame}.rs`  
 **Change I/O behavior**: `src/loop/bridge.rs`  
-**Fix memory issues**: `src/mem/allocator.rs`, `src/runtime/mod.rs`  
-**System call changes**: `src/sys/{net,fs,epoll,pty,mmap}.rs`  
+**Fix memory issues**: `src/runtime/allocator.rs`, `src/runtime/mod.rs`  
+**System call changes**: `src/sys/{net,fs,epoll,pty,mmap}.rs` or `src/runtime/syscall.rs`  
 **Worker limits/reaping**: `src/server.rs` (see `MAX_WORKERS`, SIGCHLD handler)
