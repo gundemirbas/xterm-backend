@@ -154,6 +154,7 @@ pub fn server_main() {
                             }
                             let _ = sys::fs::close(epfd);
                             // child continues below to perform upgrade and run bridge
+                            // child continues below to perform upgrade and run bridge
                         }
                         _ => {
                             let _ = sys::fs::close(fd);
