@@ -1,4 +1,4 @@
-pub fn sha1(msg: &[u8], out: &mut [u8; 20]) {
+pub(crate) fn sha1(msg: &[u8], out: &mut [u8; 20]) {
     let mut h0: u32 = 0x67452301;
     let mut h1: u32 = 0xEFCDAB89;
     let mut h2: u32 = 0x98BADCFE;
@@ -103,7 +103,7 @@ fn sha1_block(
     *h4 = h4.wrapping_add(e);
 }
 
-pub fn base64_encode(src: &[u8], dst: &mut [u8]) -> usize {
+pub(crate) fn base64_encode(src: &[u8], dst: &mut [u8]) -> usize {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut i = 0;
     let mut o = 0;

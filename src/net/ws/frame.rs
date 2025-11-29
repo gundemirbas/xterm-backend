@@ -1,6 +1,6 @@
 use crate::sys::net as sysnet;
 
-pub fn write_binary_frame(fd: usize, payload: &[u8]) -> Result<(), &'static str> {
+pub(crate) fn write_binary_frame(fd: usize, payload: &[u8]) -> Result<(), &'static str> {
     let mut hdr = [0u8; 10];
     hdr[0] = 0x80 | 0x2; // FIN + binary
     let off = if payload.len() < 126 {
@@ -22,7 +22,7 @@ pub fn write_binary_frame(fd: usize, payload: &[u8]) -> Result<(), &'static str>
     sysnet::send_all(fd, payload).map_err(|_| "send payload")
 }
 
-pub fn parse_and_unmask_frames<'a>(
+pub(crate) fn parse_and_unmask_frames<'a>(
     input: &[u8],
     out: &'a mut [u8],
 ) -> Result<&'a [u8], &'static str> {
@@ -69,7 +69,7 @@ pub fn parse_and_unmask_frames<'a>(
     Ok(&out[..len])
 }
 
-pub fn copy(dst: &mut [u8], src: &[u8]) -> usize {
+pub(crate) fn copy(dst: &mut [u8], src: &[u8]) -> usize {
     let n = core::cmp::min(dst.len(), src.len());
     dst[..n].copy_from_slice(&src[..n]);
     n

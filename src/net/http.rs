@@ -1,4 +1,4 @@
-pub fn is_websocket_upgrade(req: &[u8]) -> bool {
+pub(crate) fn is_websocket_upgrade(req: &[u8]) -> bool {
     let upgrade = header(req, "Upgrade");
     let connection = header(req, "Connection");
 
@@ -12,7 +12,7 @@ pub fn is_websocket_upgrade(req: &[u8]) -> bool {
     }
 }
 
-pub fn path_is_term(req: &[u8]) -> bool {
+pub(crate) fn path_is_term(req: &[u8]) -> bool {
     if let Some(line) = first_line(req) {
         line.starts_with("GET /term ")
     } else {
@@ -26,7 +26,7 @@ fn first_line(req: &[u8]) -> Option<&str> {
     it.next()
 }
 
-pub fn header<'a>(req: &'a [u8], name: &str) -> Option<&'a str> {
+pub(crate) fn header<'a>(req: &'a [u8], name: &str) -> Option<&'a str> {
     let s = core::str::from_utf8(req).ok()?;
     for line in s.split("\r\n").skip(1) {
         if line.is_empty() {
@@ -51,7 +51,7 @@ fn eq_case_insensitive(a: &str, b: &str) -> bool {
         .all(|(x, y)| x.eq_ignore_ascii_case(&y))
 }
 
-pub fn serve_html(fd: usize, body: &[u8]) {
+pub(crate) fn serve_html(fd: usize, body: &[u8]) {
     let head = b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: ";
     let mut lenbuf = itoa::Buffer::new();
     let len_str = lenbuf.format(body.len() as u64);

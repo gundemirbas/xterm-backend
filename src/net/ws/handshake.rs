@@ -4,7 +4,7 @@ use crate::sys::net as sysnet;
 
 const WS_GUID: &[u8] = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
-pub fn upgrade_to_websocket(fd: usize, req: &[u8]) -> Result<WebSocket, &'static str> {
+pub(crate) fn upgrade_to_websocket(fd: usize, req: &[u8]) -> Result<WebSocket, &'static str> {
     let key = http::header(req, "Sec-WebSocket-Key").ok_or("no key")?;
     let mut concat = [0u8; 128];
     let key_b = key.as_bytes();

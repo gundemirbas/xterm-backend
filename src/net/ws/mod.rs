@@ -1,10 +1,10 @@
-pub mod crypto;
-pub mod frame;
-pub mod handshake;
+mod crypto;
+mod frame;
+mod handshake;
 
-pub struct WebSocket {
-    pub fd: usize,
+pub(crate) struct WebSocket {
+    pub(crate) fd: usize,
 }
 
-pub use frame::{parse_and_unmask_frames, write_binary_frame};
-pub use handshake::upgrade_to_websocket;
+pub(crate) use frame::{parse_and_unmask_frames, write_binary_frame};
+pub(crate) use handshake::upgrade_to_websocket;

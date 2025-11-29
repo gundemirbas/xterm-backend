@@ -2,7 +2,7 @@ use crate::net;
 use crate::pty;
 use crate::sys;
 mod bridge;
-pub static INDEX_HTML: &[u8] = include_bytes!("../assets/terminal.html");
+pub static INDEX_HTML: &[u8] = include_bytes!("../../assets/terminal.html");
 
 // The accept loop and signal handling live in `main.rs` now. Server exposes
 // the helper functions used by the bootstrap (listener setup and handlers).

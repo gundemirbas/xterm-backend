@@ -18,7 +18,7 @@ pub extern "C" fn _start() -> ! {
 }
 
 #[inline(always)]
-pub fn exit_now(code: i32) -> ! {
+pub(crate) fn exit_now(code: i32) -> ! {
     unsafe {
         core::arch::asm!(
             "syscall",
