@@ -348,6 +348,44 @@ def graceful_shutdown_test():
         pass
 
 
+def _start_server_if_needed():
+    """Start the release server if nothing is listening on the test port.
+    Returns (proc, logf, started_bool, listen_pid).
+    If a server was already listening, returns (None, None, False, pid).
+    """
+    listen_pid = _find_listening_pid(PORT)
+    if listen_pid:
+        print('detected existing server pid:', listen_pid)
+        return (None, None, False, listen_pid)
+
+    script_dir = os.path.dirname(__file__)
+    root = os.path.abspath(os.path.join(script_dir, '..'))
+    server_bin = os.path.join(root, 'target', 'x86_64-unknown-linux-gnu', 'release', 'xterm-backend')
+    if not os.path.exists(server_bin):
+        print('release binary not found, building...')
+        try:
+            subprocess.check_call(['cargo', 'build', '--release'], cwd=root)
+        except Exception as e:
+            print('build failed:', e)
+            return (None, None, False, None)
+
+    server_log = os.path.join(root, 'server.log')
+    print('starting server:', server_bin)
+    logf = open(server_log, 'wb')
+    proc = subprocess.Popen([server_bin], cwd=root, stdout=logf, stderr=logf)
+    # wait for server to bind
+    for _ in range(10):
+        time.sleep(0.2)
+        listen_pid = _find_listening_pid(PORT)
+        if listen_pid:
+            break
+    if not listen_pid:
+        print('warning: server did not appear to bind to port', PORT)
+    else:
+        print('server listening pid:', listen_pid)
+    return (proc, logf, True, listen_pid)
+
+
 def main():
     mapping = {
         'handshake_raw': handshake_raw,
@@ -368,6 +406,14 @@ def main():
     else:
         steps = args
 
+    # Start server automatically for tests that require it (but not for 'graceful' which manages its own server)
+    needs_server = any(n for n in steps if n in ('handshake_raw', 'handshake_timeout', 'ws_client_test', 'stress', 'reclaim'))
+    server_proc = None
+    server_logf = None
+    started_server = False
+    if needs_server:
+        server_proc, server_logf, started_server, listen_pid = _start_server_if_needed()
+
     results = {}
     for name in steps:
         fn = mapping.get(name)
@@ -383,6 +429,23 @@ def main():
             ok = False
         results[name] = ok
         time.sleep(0.15)
+
+    # If we started a server here, try to terminate it cleanly
+    if started_server and server_proc is not None:
+        print('\nStopping started server...')
+        try:
+            os.kill(server_proc.pid, 15)
+            time.sleep(0.5)
+        except Exception:
+            pass
+        try:
+            server_proc.kill()
+        except Exception:
+            pass
+        try:
+            server_logf.close()
+        except Exception:
+            pass
 
     print('\nSummary:')
     all_ok = True
