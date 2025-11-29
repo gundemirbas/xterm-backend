@@ -8,7 +8,6 @@ mod server;
 mod sys;
 
 fn main() -> ! {
-    crate::server::log(b"start\n");
     let (listen_fd, epfd, sfd) = crate::server::setup_listener();
 
     let mut events = [crate::sys::epoll::EpollEvent::default(); 8];
@@ -17,12 +16,7 @@ fn main() -> ! {
     loop {
         let n = match crate::sys::epoll::epoll_wait(epfd, &mut events, -1) {
             Ok(v) => v,
-            Err(e) => {
-                crate::server::log(b"epoll_wait errno: ");
-                crate::server::log_num(-e as i32);
-                crate::server::log(b"\n");
-                continue;
-            }
+            Err(_) => continue,
         };
         let mut shutdown = false;
         for event in events.iter().take(n) {
@@ -56,8 +50,5 @@ fn main() -> ! {
     if sfd != usize::MAX {
         let _ = crate::sys::fs::close(sfd);
     }
-    // server_main returned (e.g. due to signal/shutdown). Exit process so children get PDEATHSIG.
     crate::server::exit_now(0)
 }
-// `server::server_main`, `exit_now`, and logging helpers live in `src/server.rs`
-// after the refactor. `main.rs` only contains the bootstrap sequence.

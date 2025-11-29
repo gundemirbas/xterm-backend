@@ -3,7 +3,7 @@ use core::ptr::null_mut;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 const PAGE_SIZE: usize = 4096;
-const ARENA_SIZE: usize = 16 * 1024 * 1024; // 16 MiB arena
+const ARENA_SIZE: usize = 16 * 1024 * 1024;
 
 fn round_up_page(n: usize) -> usize {
     if n == 0 {
@@ -22,7 +22,6 @@ static ARENA_OFF: AtomicUsize = AtomicUsize::new(0);
 pub struct MmapAllocator;
 
 impl MmapAllocator {
-    // Ensure arena exists and return base pointer
     unsafe fn ensure_arena(&self) -> *mut u8 {
         let base = ARENA_BASE.load(Ordering::SeqCst);
         if base != 0 {
@@ -36,7 +35,6 @@ impl MmapAllocator {
         match prev {
             Ok(_) => p,
             Err(existing) => {
-                // another thread initialized; release our mapping
                 let _ = crate::sys::mmap::munmap_free(p, ARENA_SIZE);
                 existing as *mut u8
             }
@@ -48,7 +46,6 @@ unsafe impl GlobalAlloc for MmapAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let size = layout.size().max(1);
         let align = layout.align().max(1);
-        // try arena allocation first
         let base = unsafe { self.ensure_arena() };
         if !base.is_null() {
             let off = ARENA_OFF.fetch_add(align_up(size, align), Ordering::SeqCst);
@@ -56,7 +53,6 @@ unsafe impl GlobalAlloc for MmapAllocator {
                 return unsafe { base.add(off) };
             }
         }
-        // fallback: allocate page-aligned mmap region
         let sz = round_up_page(size);
         match crate::sys::mmap::mmap_alloc(sz) {
             Ok(p) => p,
@@ -73,7 +69,6 @@ unsafe impl GlobalAlloc for MmapAllocator {
             let b = base as usize;
             let p = ptr as usize;
             if p >= b && p < b + ARENA_SIZE {
-                // arena allocation - no-op
                 return;
             }
         }
@@ -100,7 +95,6 @@ unsafe impl GlobalAlloc for MmapAllocator {
         let base = ARENA_BASE.load(Ordering::SeqCst) as *mut u8;
         let p_usize = ptr as usize;
         let arena_base_usize = base as usize;
-        // if ptr is inside arena, we cannot free/realloc in place; allocate new and copy
         let new_layout = unsafe { Layout::from_size_align_unchecked(new_size, layout.align()) };
         let new_ptr = unsafe { self.alloc(new_layout) };
         if new_ptr.is_null() {
@@ -110,7 +104,6 @@ unsafe impl GlobalAlloc for MmapAllocator {
         unsafe {
             core::ptr::copy_nonoverlapping(ptr, new_ptr, copy_len);
         }
-        // if old ptr was not in arena, free it
         if base.is_null()
             || !(p_usize >= arena_base_usize && p_usize < arena_base_usize + ARENA_SIZE)
         {
@@ -123,11 +116,8 @@ unsafe impl GlobalAlloc for MmapAllocator {
 #[global_allocator]
 static GLOBAL_ALLOCATOR: MmapAllocator = MmapAllocator;
 
-// Convenience page APIs for code that previously used `sys::mmap::mmap_alloc`.
-// These return simple `Result` types and centralize page allocations here.
 pub fn page_alloc(len: usize) -> Result<*mut u8, &'static str> {
     let size = round_up_page(len.max(1));
-    // attempt to allocate from arena if possible (atomic)
     let base = ARENA_BASE.load(Ordering::SeqCst) as *mut u8;
     if !base.is_null() {
         let off = ARENA_OFF.fetch_add(size, Ordering::SeqCst);
@@ -135,7 +125,6 @@ pub fn page_alloc(len: usize) -> Result<*mut u8, &'static str> {
             return unsafe { Ok(base.add(off)) };
         }
     }
-    // fallback to mmap
     match crate::sys::mmap::mmap_alloc(size) {
         Ok(p) => Ok(p),
         Err(_) => Err("mmap"),
@@ -152,7 +141,6 @@ pub fn page_free(ptr: *mut u8, len: usize) -> Result<(), &'static str> {
         let b = base as usize;
         let p = ptr as usize;
         if p >= b && p < b + ARENA_SIZE {
-            // arena allocation - no-op
             return Ok(());
         }
     }

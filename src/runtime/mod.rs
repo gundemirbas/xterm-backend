@@ -6,7 +6,6 @@ pub mod util;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
-    // Align stack to 16 bytes and call `crate::main` so the ABI is satisfied.
     unsafe {
         core::arch::asm!(
             "and rsp, ~0xF",
@@ -22,7 +21,7 @@ pub(crate) fn exit_now(code: i32) -> ! {
     unsafe {
         core::arch::asm!(
             "syscall",
-            in("rax") 60usize, // SYS_exit
+            in("rax") 60usize,
             in("rdi") code as usize,
             options(noreturn)
         );

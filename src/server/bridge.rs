@@ -3,11 +3,9 @@ use crate::sys;
 
 pub(crate) fn run_bridge(ws_fd: usize, pty_fd: usize, child_pid: i32) -> Result<(), &'static str> {
     let epfd = sys::epoll::epoll_create1().map_err(|_| "epoll")?;
-    // block SIGINT(2) and SIGTERM(15) for this thread, and create a signalfd
     let mut mask: u64 = 0;
-    // signals are 1-indexed in the mask
-    mask |= 1u64 << (2 - 1); // SIGINT
-    mask |= 1u64 << (15 - 1); // SIGTERM
+    mask |= 1u64 << (2 - 1);
+    mask |= 1u64 << (15 - 1);
     let _ = sys::signal::block_signals(&mask as *const u64, core::mem::size_of::<u64>());
     let sfd = match sys::signal::signalfd(&mask as *const u64, core::mem::size_of::<u64>(), 0) {
         Ok(fd) => fd,
@@ -55,12 +53,11 @@ pub(crate) fn run_bridge(ws_fd: usize, pty_fd: usize, child_pid: i32) -> Result<
         for event in events.iter().take(n) {
             let fd = event.fd();
             if fd == sfd {
-                let _ = crate::sys::pty::kill(child_pid, 2); // SIGINT
+                let _ = crate::sys::pty::kill(child_pid, 2);
                 should_exit = true;
                 break;
             }
             if fd == pty_fd {
-                // buf_ptr is mmap'd memory of `buf_len` bytes
                 let r = match sys::fs::read(pty_fd, util::ptr_to_mut_slice(buf_ptr, buf_len)) {
                     Ok(v) => v,
                     Err(_) => {
@@ -73,7 +70,6 @@ pub(crate) fn run_bridge(ws_fd: usize, pty_fd: usize, child_pid: i32) -> Result<
                     should_exit = true;
                     break;
                 }
-                // buf_ptr is valid for `r` bytes as returned by read()
                 let slice = util::ptr_to_slice(buf_ptr, r);
                 if crate::net::ws::write_binary_frame(ws_fd, slice).is_err() {
                     result = Err("ws write");
@@ -81,7 +77,6 @@ pub(crate) fn run_bridge(ws_fd: usize, pty_fd: usize, child_pid: i32) -> Result<
                     break;
                 }
             } else if fd == ws_fd {
-                // buf_ptr is mmap'd memory of `buf_len` bytes
                 let r = match sys::net::recv(ws_fd, util::ptr_to_mut_slice(buf_ptr, buf_len)) {
                     Ok(v) => v,
                     Err(_) => {
@@ -94,14 +89,10 @@ pub(crate) fn run_bridge(ws_fd: usize, pty_fd: usize, child_pid: i32) -> Result<
                     should_exit = true;
                     break;
                 }
-                // buf_ptr valid for `r` bytes, scratch_ptr valid for scratch_len bytes (both mmap'd)
                 let input = util::ptr_to_slice(buf_ptr, r);
                 let out = util::ptr_to_mut_slice(scratch_ptr, scratch_len);
                 match crate::net::ws::parse_and_unmask_frames(input, out) {
                     Ok(payload) => {
-                        // If websocket payload contains a Ctrl-C (0x03), forward SIGINT
-                        // directly to the child process instead of relying on terminal
-                        // driver behavior.
                         let mut saw_sigint = false;
                         for &b in payload {
                             if b == 0x03 {
@@ -110,9 +101,8 @@ pub(crate) fn run_bridge(ws_fd: usize, pty_fd: usize, child_pid: i32) -> Result<
                             }
                         }
                         if saw_sigint {
-                            let _ = crate::sys::pty::kill(child_pid, 2); // SIGINT
+                            let _ = crate::sys::pty::kill(child_pid, 2);
                         } else {
-                            // write payload to pty; log errno if write fails
                             let _ = sys::fs::write(pty_fd, payload);
                         }
                     }

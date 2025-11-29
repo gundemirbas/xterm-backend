@@ -2,7 +2,7 @@ use crate::sys::net as sysnet;
 
 pub(crate) fn write_binary_frame(fd: usize, payload: &[u8]) -> Result<(), &'static str> {
     let mut hdr = [0u8; 10];
-    hdr[0] = 0x80 | 0x2; // FIN + binary
+    hdr[0] = 0x80 | 0x2;
     let off = if payload.len() < 126 {
         hdr[1] = payload.len() as u8;
         2

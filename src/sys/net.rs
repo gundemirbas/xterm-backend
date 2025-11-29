@@ -97,14 +97,11 @@ pub fn tcp_listen(port: u16) -> SysResult<usize> {
     let addr = SockAddrIn {
         sin_family: AF_INET as u16,
         sin_port: port.to_be(),
-        sin_addr: u32::from_be_bytes([0, 0, 0, 0]), // INADDR_ANY
+        sin_addr: u32::from_be_bytes([0, 0, 0, 0]),
         sin_zero: [0; 8],
     };
     bind(fd, &addr as *const _, core::mem::size_of::<SockAddrIn>())?;
     listen(fd, 128)?;
-    // Set close-on-exec on the listening socket so fork+exec'd children
-    // (e.g. spawned shells) do not inherit the listener and keep the
-    // port open after the parent exits.
     const SYS_FCNTL: usize = 72;
     const F_SETFD: usize = 2;
     const FD_CLOEXEC: usize = 1;

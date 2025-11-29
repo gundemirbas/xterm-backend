@@ -4,11 +4,7 @@ use crate::sys;
 mod bridge;
 pub static INDEX_HTML: &[u8] = include_bytes!("../../assets/terminal.html");
 
-// The accept loop and signal handling live in `main.rs` now. Server exposes
-// the helper functions used by the bootstrap (listener setup and handlers).
-
 pub(crate) fn setup_listener() -> (usize, usize, usize) {
-    log(b"listen begin\n");
     let listen_fd = match sys::net::tcp_listen(8000) {
         Ok(fd) => fd,
         Err(e) => {
@@ -18,7 +14,6 @@ pub(crate) fn setup_listener() -> (usize, usize, usize) {
             exit_now(1);
         }
     };
-    log(b"listen ok\n");
     let epfd = match sys::epoll::epoll_create1() {
         Ok(e) => e,
         Err(_) => {
@@ -28,9 +23,9 @@ pub(crate) fn setup_listener() -> (usize, usize, usize) {
     };
     let _ = sys::epoll::epoll_add(epfd, listen_fd, sys::epoll::EPOLLIN);
     let mut mask: u64 = 0;
-    mask |= 1u64 << (2 - 1); // SIGINT
-    mask |= 1u64 << (15 - 1); // SIGTERM
-    mask |= 1u64 << (17 - 1); // SIGCHLD
+    mask |= 1u64 << (2 - 1);
+    mask |= 1u64 << (15 - 1);
+    mask |= 1u64 << (17 - 1);
     let _ = sys::signal::block_signals(&mask as *const u64, core::mem::size_of::<u64>());
     let sfd = match sys::signal::signalfd(&mask as *const u64, core::mem::size_of::<u64>(), 0) {
         Ok(fd) => fd,
@@ -43,7 +38,6 @@ pub(crate) fn setup_listener() -> (usize, usize, usize) {
 }
 
 pub(crate) fn handle_signal_event(sfd: usize, active_workers: &mut i32) -> bool {
-    // returns true if shutdown requested
     let mut info = [0u8; 128];
     if let Ok(r) = sys::fs::read(sfd, &mut info)
         && r >= 4
@@ -53,17 +47,11 @@ pub(crate) fn handle_signal_event(sfd: usize, active_workers: &mut i32) -> bool 
             | ((info[2] as u32) << 16)
             | ((info[3] as u32) << 24);
         if signo == 17u32 {
-            // SIGCHLD: reap any dead children
             loop {
                 match crate::sys::pty::wait_any_nohang() {
-                    Ok(0) => break, // no more
+                    Ok(0) => break,
                     Ok(pid) if pid > 0 => {
                         *active_workers -= 1;
-                        let _ = crate::sys::fs::write(1, b"main: reaped worker pid ");
-                        let mut nb = itoa::Buffer::new();
-                        let s = nb.format(pid as i64);
-                        let _ = crate::sys::fs::write(1, s.as_bytes());
-                        let _ = crate::sys::fs::write(1, b"\n");
                         continue;
                     }
                     Err(_) => break,
@@ -95,9 +83,7 @@ pub(crate) fn handle_listener_event(
     })?;
 
     if net::http::is_websocket_upgrade(&buf[..n]) && net::http::path_is_term(&buf[..n]) {
-        // Enforce max worker limit
         if *active_workers >= max_workers {
-            let _ = crate::sys::fs::write(1, b"main: max workers reached, refusing connection\n");
             let _ = crate::sys::fs::write(
                 fd,
                 b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n",
@@ -113,25 +99,16 @@ pub(crate) fn handle_listener_event(
                 return Err("fork");
             }
             Ok(p) if p > 0 => {
-                // parent: p is child pid
                 *active_workers += 1;
-                let _ = crate::sys::fs::write(1, b"main: forked worker pid ");
-                let mut nb = itoa::Buffer::new();
-                let s = nb.format(p as i64);
-                let _ = crate::sys::fs::write(1, s.as_bytes());
-                let _ = crate::sys::fs::write(1, b"\n");
-                // parent should close accepted fd and continue accepting
                 let _ = sys::fs::close(fd);
                 return Ok(());
             }
             Ok(0) => {
-                // child: close listen/epoll/signalfd to avoid inheriting them
                 let _ = sys::fs::close(listen_fd);
                 if sfd != usize::MAX {
                     let _ = sys::fs::close(sfd);
                 }
                 let _ = sys::fs::close(epfd);
-                // child continues into child workflow below
             }
             _ => {
                 let _ = sys::fs::close(fd);
@@ -139,29 +116,24 @@ pub(crate) fn handle_listener_event(
             }
         }
 
-        // Child path: perform websocket upgrade and spawn pty
         match net::ws::upgrade_to_websocket(fd, &buf[..n]) {
-            Ok(ws) => {
-                match pty::spawn_sh() {
-                    Ok(p) => {
-                        let _ = bridge::run_bridge(ws.fd, p.master_fd, p.child_pid);
-                        // Clean up child shell
-                        let _ = crate::sys::pty::kill(p.child_pid, 15);
-                        if crate::sys::pty::waitpid(p.child_pid).is_err() {
-                            let _ = crate::sys::pty::kill(p.child_pid, 9);
-                            let _ = crate::sys::pty::waitpid_nohang(p.child_pid);
-                        }
-                        let _ = sys::fs::close(p.master_fd);
-                        // child must exit now so it doesn't re-enter accept loop
-                        exit_now(0);
+            Ok(ws) => match pty::spawn_sh() {
+                Ok(p) => {
+                    let _ = bridge::run_bridge(ws.fd, p.master_fd, p.child_pid);
+                    let _ = crate::sys::pty::kill(p.child_pid, 15);
+                    if crate::sys::pty::waitpid(p.child_pid).is_err() {
+                        let _ = crate::sys::pty::kill(p.child_pid, 9);
+                        let _ = crate::sys::pty::waitpid_nohang(p.child_pid);
                     }
-                    Err(_) => {
-                        log(b"pty spawn failed\n");
-                        let _ = sys::fs::close(ws.fd);
-                        exit_now(1);
-                    }
+                    let _ = sys::fs::close(p.master_fd);
+                    exit_now(0);
                 }
-            }
+                Err(_) => {
+                    log(b"pty spawn failed\n");
+                    let _ = sys::fs::close(ws.fd);
+                    exit_now(1);
+                }
+            },
             Err(_) => {
                 log(b"ws upgrade failed\n");
                 let _ = sys::fs::close(fd);
