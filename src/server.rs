@@ -3,7 +3,7 @@ use crate::net;
 use crate::pty;
 use crate::sys;
 
-static INDEX_HTML: &[u8] = include_bytes!("../assets/terminal.html");
+pub static INDEX_HTML: &[u8] = include_bytes!("../assets/terminal.html");
 
 pub fn server_main() {
     log(b"listen begin\n");
@@ -205,7 +205,7 @@ pub fn server_main() {
 }
 
 #[inline(always)]
-fn log(msg: &[u8]) {
+pub(crate) fn log(msg: &[u8]) {
     let _ = sys::fs::write(1, msg);
 }
 
@@ -233,7 +233,7 @@ fn log_num(mut n: i32) {
 }
 
 #[inline(always)]
-fn exit_now(code: i32) -> ! {
+pub(crate) fn exit_now(code: i32) -> ! {
     // SAFETY: exit syscall never returns; trivial inline asm
     unsafe {
         core::arch::asm!(

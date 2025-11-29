@@ -80,23 +80,23 @@ pub(crate) unsafe fn syscall6(
 // keep the `unsafe` inline-assembly in one place and allow callers to use
 // a safe API surface. They return `SysResult<isize>` so callers that need
 // to interpret positive values can do so.
-pub(crate) fn syscall0_checked(n: usize) -> SysResult<isize> {
+pub fn syscall0_checked(n: usize) -> SysResult<isize> {
     let r = unsafe { syscall0(n) };
     if r >= 0 { Ok(r) } else { Err(r) }
 }
-pub(crate) fn syscall1_checked(n: usize, a0: usize) -> SysResult<isize> {
+pub fn syscall1_checked(n: usize, a0: usize) -> SysResult<isize> {
     let r = unsafe { syscall1(n, a0) };
     if r >= 0 { Ok(r) } else { Err(r) }
 }
-pub(crate) fn syscall2_checked(n: usize, a0: usize, a1: usize) -> SysResult<isize> {
+pub fn syscall2_checked(n: usize, a0: usize, a1: usize) -> SysResult<isize> {
     let r = unsafe { syscall2(n, a0, a1) };
     if r >= 0 { Ok(r) } else { Err(r) }
 }
-pub(crate) fn syscall3_checked(n: usize, a0: usize, a1: usize, a2: usize) -> SysResult<isize> {
+pub fn syscall3_checked(n: usize, a0: usize, a1: usize, a2: usize) -> SysResult<isize> {
     let r = unsafe { syscall3(n, a0, a1, a2) };
     if r >= 0 { Ok(r) } else { Err(r) }
 }
-pub(crate) fn syscall4_checked(
+pub fn syscall4_checked(
     n: usize,
     a0: usize,
     a1: usize,
@@ -106,7 +106,7 @@ pub(crate) fn syscall4_checked(
     let r = unsafe { syscall4(n, a0, a1, a2, a3) };
     if r >= 0 { Ok(r) } else { Err(r) }
 }
-pub(crate) fn syscall6_checked(
+pub fn syscall6_checked(
     n: usize,
     a0: usize,
     a1: usize,
