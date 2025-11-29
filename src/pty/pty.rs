@@ -1,5 +1,3 @@
-#![allow(clippy::manual_c_str_literals)]
-
 use crate::sys::pty as sys;
 
 pub struct Pty {
