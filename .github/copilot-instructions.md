@@ -1,3 +1,69 @@
+````instructions
+# Repo guide for AI coding agents — xterm-backend
+
+Concise guide to get productive quickly. Focus on what is special about this repo (no_std runtime, raw syscalls, fork-per-connection server) and where to look for common tasks.
+
+## Big picture
+- Runtime: `no_std` with a custom entry in `src/runtime/mod.rs` (`_start`) — stack is aligned in asm and `exit_now` performs SYS_exit. Do NOT remove `#![no_main]` from `src/main.rs`.
+- Server model: parent process uses epoll + signalfd to accept connections and forks one worker per WebSocket connection. Worker lifecycle: accept → upgrade → spawn PTY → bridge (WebSocket ↔ PTY) → cleanup.
+- Module layout:
+  - `src/runtime/` — all unsafe, allocator, syscall shims, panic handlers (isolate unsafe here).
+  - `src/sys/` — syscall-based wrappers: `net`, `fs`, `epoll`, `pty`, `mmap`, `signal`.
+  - `src/net/` — HTTP and WebSocket logic (`http.rs`, `ws/*`).
+  - `src/pty/` — PTY spawn & helpers.
+  - `src/server/` — server helpers and `bridge.rs` (bridge loop lives here).
+
+## Key files to open first
+- `src/runtime/mod.rs` — custom `_start`, runtime exports, and reasons for `no_std`/`no_main`.
+- `src/runtime/allocator.rs` — `page_alloc` / `page_free` semantics and mmap fallback.
+- `src/sys/` — how raw syscalls are wrapped; used everywhere.
+- `src/server/mod.rs` and `src/server/bridge.rs` — accept loop helpers (used by `main.rs`) and the epoll bridge between WS fd and PTY master.
+- `src/net/ws/{handshake.rs,frame.rs,crypto.rs}` — handshake, masking rules, and in-tree SHA1/base64.
+- `scripts/all_tests.py` — canonical test runner (builds/releases and runs integration tests).
+
+## Project-specific conventions (do not deviate)
+- Safety: ALL `unsafe` must live in `src/runtime/`. Changes outside that folder should avoid `unsafe`.
+- no_std/no_main: Keep `#![no_std]` and `#![no_main]` in `src/main.rs`. The runtime provides `_start` and configures ABI/stack.
+- Error types: prefer `Result<T, &'static str>` with short literal messages (e.g., `Err("fork")`).
+- Logging: use `crate::server::log(b"...")` and `itoa::Buffer` for integers—no format macros.
+- WebSocket: client frames MUST be masked. Parser returns `Err("client not masked")` for unmasked frames; server writes unmasked binary frames.
+- Memory: prefer `page_alloc` for large buffers; functions operate on slices (`&[u8]` / `&mut [u8]`).
+
+## Build, test, debug (the fast path)
+- Format & lint: `cargo fmt` and `cargo clippy -- -D warnings`.
+- Build (release): `cargo build --release` → produced binary: `target/x86_64-unknown-linux-gnu/release/xterm-backend`.
+- Run server (background):
+  - `nohup target/x86_64-unknown-linux-gnu/release/xterm-backend > server.log 2>&1 &`
+  - `tail -f server.log`
+- Run the integration test suite (recommended): `python3 scripts/all_tests.py all` (it builds, starts the server, runs tests, then stops it).
+- Quick protocol check: `python3 ./scripts/test_ws_client.py`.
+
+## Debugging notes
+- Use `server.log` output for fork/accept/reap messages; tests write this file.
+- For protocol bugs: review `src/net/ws/handshake.rs` and `src/net/ws/frame.rs` (masking, payload length handling).
+- For low-level crashes or stack issues: verify `_start` stack alignment in `src/runtime/mod.rs` (inline asm) and allocator correctness.
+- LLDB/dev attach: `sudo sysctl -w kernel.yama.ptrace_scope=0` then attach to the relevant PID.
+
+## Tests & CI guidance
+- The repo contains `scripts/all_tests.py` which is the canonical runner used in development and CI. CI should:
+  - Run `cargo fmt -- --check`
+  - Run `cargo clippy -- -D warnings`
+  - Build `cargo build --release`
+  - Run `python3 scripts/all_tests.py all`
+- Do not add `Cargo.lock` to git (this project ignores it). See `.gitignore`.
+
+## Common refactors and where to change things
+- Add protocol features: `src/net/ws/*` (keep parsing deterministic and in-tree crypto).
+- Change bridge behavior or buffers: `src/server/bridge.rs` (epoll loop and buffer allocation via `page_alloc`).
+- Change accept/reap logic: `src/server/mod.rs` (helpers used by `main.rs`).
+- Unsafe/syscall changes: `src/runtime/*` and `src/sys/*` only.
+
+## Example idioms (copyable)
+- Read a signalfd and reap children (see `handle_signal_event` in `src/server/mod.rs`).
+- Upgrade handshake: call `net::ws::upgrade_to_websocket(fd, req)` then use `bridge::run_bridge(ws.fd, p.master_fd, p.child_pid)`.
+
+If any of this is unclear or you want the CI workflow I outlined committed to `.github/workflows/`, tell me which runner steps to include and I’ll add the YAML.
+````
 # Repo guide for AI coding agents
 
 This is a `no_std` Rust xterm backend using raw syscalls for HTTP server, WebSocket protocol, PTY management, and epoll-based I/O. Runs on Linux/x86_64.
