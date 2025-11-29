@@ -7,6 +7,51 @@ pub static INDEX_HTML: &[u8] = include_bytes!("../assets/terminal.html");
 
 pub fn server_main() {
     log(b"listen begin\n");
+    let (listen_fd, epfd, sfd) = setup_listener();
+
+    let mut events = [sys::epoll::EpollEvent::default(); 8];
+    let mut active_workers: i32 = 0;
+    const MAX_WORKERS: i32 = 15;
+    loop {
+        let n = match sys::epoll::epoll_wait(epfd, &mut events, -1) {
+            Ok(v) => v,
+            Err(e) => {
+                log(b"epoll_wait errno: ");
+                log_num(-e as i32);
+                log(b"\n");
+                continue;
+            }
+        };
+        let mut shutdown = false;
+        for event in events.iter().take(n) {
+            let fd = event.fd();
+            if fd == sfd {
+                if handle_signal_event(sfd, &mut active_workers) {
+                    shutdown = true;
+                    break;
+                }
+                continue;
+            }
+            if fd == listen_fd
+                && handle_listener_event(listen_fd, &mut active_workers, MAX_WORKERS, sfd, epfd)
+                    .is_err()
+            {
+                // errors are logged inside handler; continue accepting
+                continue;
+            }
+        }
+        if shutdown {
+            break;
+        }
+    }
+    let _ = sys::fs::close(listen_fd);
+    if sfd != usize::MAX {
+        let _ = sys::fs::close(sfd);
+    }
+}
+
+fn setup_listener() -> (usize, usize, usize) {
+    log(b"listen begin\n");
     let listen_fd = match sys::net::tcp_listen(8000) {
         Ok(fd) => fd,
         Err(e) => {
@@ -17,7 +62,6 @@ pub fn server_main() {
         }
     };
     log(b"listen ok\n");
-    // Use epoll + signalfd for accept loop so we can gracefully shutdown
     let epfd = match sys::epoll::epoll_create1() {
         Ok(e) => e,
         Err(_) => {
@@ -38,171 +82,139 @@ pub fn server_main() {
     if sfd != usize::MAX {
         let _ = sys::epoll::epoll_add(epfd, sfd, sys::epoll::EPOLLIN);
     }
+    (listen_fd, epfd, sfd)
+}
 
-    let mut events = [sys::epoll::EpollEvent::default(); 8];
-    let mut active_workers: i32 = 0;
-    const MAX_WORKERS: i32 = 15;
-    loop {
-        let n = match sys::epoll::epoll_wait(epfd, &mut events, -1) {
-            Ok(v) => v,
-            Err(e) => {
-                log(b"epoll_wait errno: ");
-                log_num(-e as i32);
-                log(b"\n");
-                continue;
-            }
-        };
-        let mut shutdown = false;
-        for event in events.iter().take(n) {
-            let fd = event.fd();
-            if fd == sfd {
-                // read signalfd_siginfo (we only need signo at u32 offset 0)
-                let mut info = [0u8; 128];
-                if let Ok(r) = sys::fs::read(sfd, &mut info)
-                    && r >= 4
-                {
-                    let signo = (info[0] as u32)
-                        | ((info[1] as u32) << 8)
-                        | ((info[2] as u32) << 16)
-                        | ((info[3] as u32) << 24);
-                    if signo == 17u32 {
-                        // SIGCHLD
-                        // reap any dead children
-                        loop {
-                            match crate::sys::pty::wait_any_nohang() {
-                                Ok(0) => break, // no more
-                                Ok(pid) if pid > 0 => {
-                                    active_workers -= 1;
-                                    let _ = crate::sys::fs::write(1, b"main: reaped worker pid ");
-                                    let mut nb = itoa::Buffer::new();
-                                    let s = nb.format(pid as i64);
-                                    let _ = crate::sys::fs::write(1, s.as_bytes());
-                                    let _ = crate::sys::fs::write(1, b"\n");
-                                    continue;
-                                }
-                                Err(_) => break,
-                                _ => break,
-                            }
-                        }
-                    } else if signo == 2u32 || signo == 15u32 {
-                        shutdown = true;
-                        break;
-                    }
-                }
-                continue;
-            }
-            if fd == listen_fd {
-                let (fd2, _) = match sys::net::accept_blocking(listen_fd) {
-                    Ok(v) => v,
-                    Err(_) => {
-                        log(b"accept failed\n");
+fn handle_signal_event(sfd: usize, active_workers: &mut i32) -> bool {
+    // returns true if shutdown requested
+    let mut info = [0u8; 128];
+    if let Ok(r) = sys::fs::read(sfd, &mut info)
+        && r >= 4
+    {
+        let signo = (info[0] as u32)
+            | ((info[1] as u32) << 8)
+            | ((info[2] as u32) << 16)
+            | ((info[3] as u32) << 24);
+        if signo == 17u32 {
+            // SIGCHLD: reap any dead children
+            loop {
+                match crate::sys::pty::wait_any_nohang() {
+                    Ok(0) => break, // no more
+                    Ok(pid) if pid > 0 => {
+                        *active_workers -= 1;
+                        let _ = crate::sys::fs::write(1, b"main: reaped worker pid ");
+                        let mut nb = itoa::Buffer::new();
+                        let s = nb.format(pid as i64);
+                        let _ = crate::sys::fs::write(1, s.as_bytes());
+                        let _ = crate::sys::fs::write(1, b"\n");
                         continue;
                     }
-                };
-                let fd = fd2;
-
-                let mut buf = [0u8; 8192];
-                let n = match sys::net::recv(fd, &mut buf) {
-                    Ok(n) => n,
-                    Err(_) => {
-                        log(b"recv failed\n");
-                        let _ = sys::fs::close(fd);
-                        continue;
-                    }
-                };
-
-                if net::http::is_websocket_upgrade(&buf[..n]) && net::http::path_is_term(&buf[..n])
-                {
-                    // Enforce max worker limit
-                    if active_workers >= MAX_WORKERS {
-                        let _ = crate::sys::fs::write(
-                            1,
-                            b"main: max workers reached, refusing connection\n",
-                        );
-                        // send minimal HTTP 503 response
-                        let _ = crate::sys::fs::write(
-                            fd,
-                            b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n",
-                        );
-                        let _ = sys::fs::close(fd);
-                        continue;
-                    }
-
-                    match crate::sys::pty::fork() {
-                        Err(_) => {
-                            log(b"fork failed\n");
-                            let _ = sys::fs::close(fd);
-                            continue;
-                        }
-                        Ok(p) if p > 0 => {
-                            // parent: p is child pid
-                            active_workers += 1;
-                            let _ = crate::sys::fs::write(1, b"main: forked worker pid ");
-                            let mut nb = itoa::Buffer::new();
-                            let s = nb.format(p as i64);
-                            let _ = crate::sys::fs::write(1, s.as_bytes());
-                            let _ = crate::sys::fs::write(1, b"\n");
-                            // parent should close accepted fd and continue accepting
-                            let _ = sys::fs::close(fd);
-                            continue;
-                        }
-                        Ok(0) => {
-                            // child: close listen/epoll/signalfd to avoid inheriting them
-                            let _ = sys::fs::close(listen_fd);
-                            if sfd != usize::MAX {
-                                let _ = sys::fs::close(sfd);
-                            }
-                            let _ = sys::fs::close(epfd);
-
-                            // child continues below to perform upgrade and run bridge
-                        }
-                        _ => {
-                            let _ = sys::fs::close(fd);
-                            continue;
-                        }
-                    }
-                    // Child path continues here (after fork returned 0)
-                    match net::ws::upgrade_to_websocket(fd, &buf[..n]) {
-                        Ok(ws) => {
-                            match pty::spawn_sh() {
-                                Ok(p) => {
-                                    let _ = r#loop::bridge::run(ws.fd, p.master_fd, p.child_pid);
-                                    // Clean up child shell
-                                    let _ = crate::sys::pty::kill(p.child_pid, 15);
-                                    if crate::sys::pty::waitpid(p.child_pid).is_err() {
-                                        let _ = crate::sys::pty::kill(p.child_pid, 9);
-                                        let _ = crate::sys::pty::waitpid_nohang(p.child_pid);
-                                    }
-                                    let _ = sys::fs::close(p.master_fd);
-                                    // child must exit now so it doesn't re-enter accept loop
-                                    exit_now(0);
-                                }
-                                Err(_) => {
-                                    log(b"pty spawn failed\n");
-                                    let _ = sys::fs::close(ws.fd);
-                                    exit_now(1);
-                                }
-                            }
-                        }
-                        Err(_) => {
-                            log(b"ws upgrade failed\n");
-                            let _ = sys::fs::close(fd);
-                            exit_now(1);
-                        }
-                    }
-                } else {
-                    net::http::serve_html(fd, INDEX_HTML);
+                    Err(_) => break,
+                    _ => break,
                 }
             }
-        }
-        if shutdown {
-            break;
+            return false;
+        } else if signo == 2u32 || signo == 15u32 {
+            return true;
         }
     }
-    let _ = sys::fs::close(listen_fd);
-    if sfd != usize::MAX {
-        let _ = sys::fs::close(sfd);
+    false
+}
+
+fn handle_listener_event(
+    listen_fd: usize,
+    active_workers: &mut i32,
+    max_workers: i32,
+    sfd: usize,
+    epfd: usize,
+) -> Result<(), &'static str> {
+    let (fd2, _) = sys::net::accept_blocking(listen_fd).map_err(|_| "accept")?;
+    let fd = fd2;
+
+    let mut buf = [0u8; 8192];
+    let n = sys::net::recv(fd, &mut buf).map_err(|_| {
+        let _ = sys::fs::close(fd);
+        "recv"
+    })?;
+
+    if net::http::is_websocket_upgrade(&buf[..n]) && net::http::path_is_term(&buf[..n]) {
+        // Enforce max worker limit
+        if *active_workers >= max_workers {
+            let _ = crate::sys::fs::write(1, b"main: max workers reached, refusing connection\n");
+            let _ = crate::sys::fs::write(
+                fd,
+                b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n",
+            );
+            let _ = sys::fs::close(fd);
+            return Ok(());
+        }
+
+        match crate::sys::pty::fork() {
+            Err(_) => {
+                log(b"fork failed\n");
+                let _ = sys::fs::close(fd);
+                return Err("fork");
+            }
+            Ok(p) if p > 0 => {
+                // parent: p is child pid
+                *active_workers += 1;
+                let _ = crate::sys::fs::write(1, b"main: forked worker pid ");
+                let mut nb = itoa::Buffer::new();
+                let s = nb.format(p as i64);
+                let _ = crate::sys::fs::write(1, s.as_bytes());
+                let _ = crate::sys::fs::write(1, b"\n");
+                // parent should close accepted fd and continue accepting
+                let _ = sys::fs::close(fd);
+                return Ok(());
+            }
+            Ok(0) => {
+                // child: close listen/epoll/signalfd to avoid inheriting them
+                let _ = sys::fs::close(listen_fd);
+                if sfd != usize::MAX {
+                    let _ = sys::fs::close(sfd);
+                }
+                let _ = sys::fs::close(epfd);
+                // child continues into child workflow below
+            }
+            _ => {
+                let _ = sys::fs::close(fd);
+                return Err("fork-other");
+            }
+        }
+
+        // Child path: perform websocket upgrade and spawn pty
+        match net::ws::upgrade_to_websocket(fd, &buf[..n]) {
+            Ok(ws) => {
+                match pty::spawn_sh() {
+                    Ok(p) => {
+                        let _ = r#loop::bridge::run(ws.fd, p.master_fd, p.child_pid);
+                        // Clean up child shell
+                        let _ = crate::sys::pty::kill(p.child_pid, 15);
+                        if crate::sys::pty::waitpid(p.child_pid).is_err() {
+                            let _ = crate::sys::pty::kill(p.child_pid, 9);
+                            let _ = crate::sys::pty::waitpid_nohang(p.child_pid);
+                        }
+                        let _ = sys::fs::close(p.master_fd);
+                        // child must exit now so it doesn't re-enter accept loop
+                        exit_now(0);
+                    }
+                    Err(_) => {
+                        log(b"pty spawn failed\n");
+                        let _ = sys::fs::close(ws.fd);
+                        exit_now(1);
+                    }
+                }
+            }
+            Err(_) => {
+                log(b"ws upgrade failed\n");
+                let _ = sys::fs::close(fd);
+                exit_now(1);
+            }
+        }
+    } else {
+        net::http::serve_html(fd, INDEX_HTML);
     }
+    Ok(())
 }
 
 #[inline(always)]
