@@ -10,6 +10,8 @@
 *.pid
 *.out
 *.lock
+# Ignore Cargo.lock (untracked per request)
+Cargo.lock
 
 # Do not track generated reports or runtime logs
 /reports/
