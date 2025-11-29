@@ -9,6 +9,7 @@
 *.txt
 *.pid
 *.out
+*.lock
 
 # Do not track generated reports or runtime logs
 /reports/

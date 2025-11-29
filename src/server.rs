@@ -1,8 +1,144 @@
-use crate::r#loop;
 use crate::net;
 use crate::pty;
 use crate::sys;
 
+// Bridge helper moved from `src/loop/bridge.rs` into server as a local helper
+fn run_bridge(ws_fd: usize, pty_fd: usize, child_pid: i32) -> Result<(), &'static str> {
+    let epfd = crate::sys::epoll::epoll_create1().map_err(|_| "epoll")?;
+    // block SIGINT(2) and SIGTERM(15) for this thread, and create a signalfd
+    let mut mask: u64 = 0;
+    // signals are 1-indexed in the mask
+    mask |= 1u64 << (2 - 1); // SIGINT
+    mask |= 1u64 << (15 - 1); // SIGTERM
+    let _ = crate::sys::signal::block_signals(&mask as *const u64, core::mem::size_of::<u64>());
+    let sfd = match crate::sys::signal::signalfd(&mask as *const u64, core::mem::size_of::<u64>(), 0) {
+        Ok(fd) => fd,
+        Err(_) => usize::MAX,
+    };
+    crate::sys::epoll::epoll_add(epfd, ws_fd, crate::sys::epoll::EPOLLIN).map_err(|_| "epoll add ws")?;
+    crate::sys::epoll::epoll_add(epfd, pty_fd, crate::sys::epoll::EPOLLIN).map_err(|_| "epoll add pty")?;
+    if sfd != usize::MAX {
+        crate::sys::epoll::epoll_add(epfd, sfd, crate::sys::epoll::EPOLLIN).map_err(|_| "epoll add signalfd")?;
+    }
+
+    let buf_len = 64 * 1024;
+    let scratch_len = 64 * 1024;
+    let buf_ptr = match crate::runtime::allocator::page_alloc(buf_len) {
+        Ok(p) => p,
+        Err(_) => return Err("mmap buf"),
+    };
+    if buf_ptr.is_null() {
+        return Err("mmap buf null");
+    }
+    let scratch_ptr = match crate::runtime::allocator::page_alloc(scratch_len) {
+        Ok(p) => p,
+        Err(_) => {
+            let _ = crate::runtime::allocator::page_free(buf_ptr, buf_len);
+            return Err("mmap scratch");
+        }
+    };
+    if scratch_ptr.is_null() {
+        let _ = crate::runtime::allocator::page_free(buf_ptr, buf_len);
+        return Err("mmap scratch null");
+    }
+
+    let mut events = [crate::sys::epoll::EpollEvent::default(); 32];
+    let mut should_exit = false;
+    let mut result: Result<(), &'static str> = Ok(());
+
+    loop {
+        let n = match crate::sys::epoll::epoll_wait(epfd, &mut events, -1) {
+            Ok(v) => v,
+            Err(_) => {
+                result = Err("wait");
+                break;
+            }
+        };
+        for event in events.iter().take(n) {
+            let fd = event.fd();
+            if fd == sfd {
+                let _ = crate::sys::pty::kill(child_pid, 2); // SIGINT
+                should_exit = true;
+                break;
+            }
+            if fd == pty_fd {
+                // buf_ptr is mmap'd memory of `buf_len` bytes
+                let r = match crate::sys::fs::read(pty_fd, crate::runtime::util::ptr_to_mut_slice(buf_ptr, buf_len)) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        result = Err("pty read");
+                        should_exit = true;
+                        break;
+                    }
+                };
+                if r == 0 {
+                    should_exit = true;
+                    break;
+                }
+                // buf_ptr is valid for `r` bytes as returned by read()
+                let slice = crate::runtime::util::ptr_to_slice(buf_ptr, r);
+                if crate::net::ws::write_binary_frame(ws_fd, slice).is_err() {
+                    result = Err("ws write");
+                    should_exit = true;
+                    break;
+                }
+            } else if fd == ws_fd {
+                // buf_ptr is mmap'd memory of `buf_len` bytes
+                let r = match crate::sys::net::recv(ws_fd, crate::runtime::util::ptr_to_mut_slice(buf_ptr, buf_len)) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        result = Err("ws read");
+                        should_exit = true;
+                        break;
+                    }
+                };
+                if r == 0 {
+                    should_exit = true;
+                    break;
+                }
+                // buf_ptr valid for `r` bytes, scratch_ptr valid for scratch_len bytes (both mmap'd)
+                let input = crate::runtime::util::ptr_to_slice(buf_ptr, r);
+                let out = crate::runtime::util::ptr_to_mut_slice(scratch_ptr, scratch_len);
+                match crate::net::ws::parse_and_unmask_frames(input, out) {
+                    Ok(payload) => {
+                        // If websocket payload contains a Ctrl-C (0x03), forward SIGINT
+                        // directly to the child process instead of relying on terminal
+                        // driver behavior.
+                        let mut saw_sigint = false;
+                        for &b in payload {
+                            if b == 0x03 {
+                                saw_sigint = true;
+                                break;
+                            }
+                        }
+                        if saw_sigint {
+                            let _ = crate::sys::pty::kill(child_pid, 2); // SIGINT
+                        } else {
+                            // write payload to pty; log errno if write fails
+                            let _ = crate::sys::fs::write(pty_fd, payload);
+                        }
+                    }
+                    Err("close") => {
+                        should_exit = true;
+                        break;
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+        if should_exit {
+            break;
+        }
+    }
+
+    let _ = crate::runtime::allocator::page_free(buf_ptr, buf_len);
+    let _ = crate::runtime::allocator::page_free(scratch_ptr, scratch_len);
+    if sfd != usize::MAX {
+        let _ = crate::sys::fs::close(sfd);
+    }
+
+    result
+}
 pub static INDEX_HTML: &[u8] = include_bytes!("../assets/terminal.html");
 
 pub fn server_main() {
@@ -187,7 +323,7 @@ fn handle_listener_event(
             Ok(ws) => {
                 match pty::spawn_sh() {
                     Ok(p) => {
-                        let _ = r#loop::bridge::run(ws.fd, p.master_fd, p.child_pid);
+                        let _ = run_bridge(ws.fd, p.master_fd, p.child_pid);
                         // Clean up child shell
                         let _ = crate::sys::pty::kill(p.child_pid, 15);
                         if crate::sys::pty::waitpid(p.child_pid).is_err() {
