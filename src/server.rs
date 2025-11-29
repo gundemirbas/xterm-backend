@@ -32,7 +32,10 @@ pub fn server_main() {
                 }
                 continue;
             }
-            if fd == listen_fd && handle_listener_event(listen_fd, &mut active_workers, MAX_WORKERS, sfd, epfd).is_err() {
+            if fd == listen_fd
+                && handle_listener_event(listen_fd, &mut active_workers, MAX_WORKERS, sfd, epfd)
+                    .is_err()
+            {
                 // errors are logged inside handler; continue accepting
                 continue;
             }
