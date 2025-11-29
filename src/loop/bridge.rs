@@ -1,6 +1,6 @@
 use crate::net::ws;
 use crate::sys::epoll;
-use crate::sys::{fs, mmap, net, signal, util};
+use crate::sys::{fs, net, signal, util};
 
 pub fn run(ws_fd: usize, pty_fd: usize, child_pid: i32) -> Result<(), &'static str> {
     let epfd = epoll::epoll_create1().map_err(|_| "epoll")?;
@@ -22,22 +22,22 @@ pub fn run(ws_fd: usize, pty_fd: usize, child_pid: i32) -> Result<(), &'static s
 
     let buf_len = 64 * 1024;
     let scratch_len = 64 * 1024;
-    let buf_ptr = match mmap::mmap_alloc(buf_len) {
+        let buf_ptr = match crate::mem::allocator::page_alloc(buf_len) {
         Ok(p) => p,
         Err(_) => return Err("mmap buf"),
     };
     if buf_ptr.is_null() {
         return Err("mmap buf null");
     }
-    let scratch_ptr = match mmap::mmap_alloc(scratch_len) {
+        let scratch_ptr = match crate::mem::allocator::page_alloc(scratch_len) {
         Ok(p) => p,
         Err(_) => {
-            let _ = mmap::munmap_free(buf_ptr, buf_len);
+            let _ = crate::mem::allocator::page_free(buf_ptr, buf_len);
             return Err("mmap scratch");
         }
     };
     if scratch_ptr.is_null() {
-        let _ = mmap::munmap_free(buf_ptr, buf_len);
+        let _ = crate::mem::allocator::page_free(buf_ptr, buf_len);
         return Err("mmap scratch null");
     }
 
@@ -130,8 +130,8 @@ pub fn run(ws_fd: usize, pty_fd: usize, child_pid: i32) -> Result<(), &'static s
         }
     }
 
-    let _ = mmap::munmap_free(buf_ptr, buf_len);
-    let _ = mmap::munmap_free(scratch_ptr, scratch_len);
+        let _ = crate::mem::allocator::page_free(buf_ptr, buf_len);
+        let _ = crate::mem::allocator::page_free(scratch_ptr, scratch_len);
     if sfd != usize::MAX {
         let _ = fs::close(sfd);
     }
