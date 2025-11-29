@@ -3,45 +3,45 @@
 
 Concise guide to get productive quickly. Focus on what is special about this repo (no_std runtime, raw syscalls, fork-per-connection server) and where to look for common tasks.
 
-## Big picture
-- Runtime: `no_std` with a custom entry in `src/runtime/mod.rs` (`_start`) — stack is aligned in asm and `exit_now` performs SYS_exit. Do NOT remove `#![no_main]` from `src/main.rs`.
-- Server model: parent process uses epoll + signalfd to accept connections and forks one worker per WebSocket connection. Worker lifecycle: accept → upgrade → spawn PTY → bridge (WebSocket ↔ PTY) → cleanup.
-- Module layout:
-  - `src/runtime/` — all unsafe, allocator, syscall shims, panic handlers (isolate unsafe here).
-  - `src/sys/` — syscall-based wrappers: `net`, `fs`, `epoll`, `pty`, `mmap`, `signal`.
-  - `src/net/` — HTTP and WebSocket logic (`http.rs`, `ws/*`).
-  - `src/pty/` — PTY spawn & helpers.
-  - `src/server/` — server helpers and `bridge.rs` (bridge loop lives here).
+````instructions
+# xterm-backend — concise AI agent guide
 
-## Key files to open first
-- `src/runtime/mod.rs` — custom `_start`, runtime exports, and reasons for `no_std`/`no_main`.
-- `src/runtime/allocator.rs` — `page_alloc` / `page_free` semantics and mmap fallback.
-- `src/sys/` — how raw syscalls are wrapped; used everywhere.
-- `src/server/mod.rs` and `src/server/bridge.rs` — accept loop helpers (used by `main.rs`) and the epoll bridge between WS fd and PTY master.
-- `src/net/ws/{handshake.rs,frame.rs,crypto.rs}` — handshake, masking rules, and in-tree SHA1/base64.
-- `scripts/all_tests.py` — canonical test runner (builds/releases and runs integration tests).
+This repo is a no_std Rust backend using raw syscalls. Key constraints: custom `_start` entry, all `unsafe` code lives under `src/runtime/`, and the server uses a fork-per-connection model.
 
-## Project-specific conventions (do not deviate)
-- Safety: ALL `unsafe` must live in `src/runtime/`. Changes outside that folder should avoid `unsafe`.
-- no_std/no_main: Keep `#![no_std]` and `#![no_main]` in `src/main.rs`. The runtime provides `_start` and configures ABI/stack.
-- Error types: prefer `Result<T, &'static str>` with short literal messages (e.g., `Err("fork")`).
-- Logging: use `crate::server::log(b"...")` and `itoa::Buffer` for integers—no format macros.
-- WebSocket: client frames MUST be masked. Parser returns `Err("client not masked")` for unmasked frames; server writes unmasked binary frames.
-- Memory: prefer `page_alloc` for large buffers; functions operate on slices (`&[u8]` / `&mut [u8]`).
+Quick facts
+- Entry/runtime: `src/runtime/mod.rs` defines `_start` and stack alignment; keep `#![no_std]` + `#![no_main]` in `src/main.rs`.
+- Server: parent uses epoll + signalfd and forks one worker per WS connection. Bridge lives in `src/server/bridge.rs`.
 
-## Build, test, debug (the fast path)
-- Format & lint: `cargo fmt` and `cargo clippy -- -D warnings`.
-- Build (release): `cargo build --release` → produced binary: `target/x86_64-unknown-linux-gnu/release/xterm-backend`.
-- Run server (background):
-  - `nohup target/x86_64-unknown-linux-gnu/release/xterm-backend > server.log 2>&1 &`
-  - `tail -f server.log`
-- Run the integration test suite (recommended): `python3 scripts/all_tests.py all` (it builds, starts the server, runs tests, then stops it).
-- Quick protocol check: `python3 ./scripts/test_ws_client.py`.
+Files to scan first
+- `src/runtime/*` — allocator, syscall shims, panic handlers (unsafe only here).
+- `src/server/mod.rs`, `src/server/bridge.rs` — accept loop helpers and PTY↔WS bridge.
+- `src/net/http.rs`, `src/net/ws/{handshake.rs,frame.rs,crypto.rs}` — HTTP parsing, WS handshake, masking rules.
+- `scripts/all_tests.py` — canonical integration test runner (builds, starts server, runs tests).
 
-## Debugging notes
-- Use `server.log` output for fork/accept/reap messages; tests write this file.
-- For protocol bugs: review `src/net/ws/handshake.rs` and `src/net/ws/frame.rs` (masking, payload length handling).
-- For low-level crashes or stack issues: verify `_start` stack alignment in `src/runtime/mod.rs` (inline asm) and allocator correctness.
+Essential commands
+- Format & lint: `cargo fmt` && `cargo clippy -- -D warnings`
+- Build (release): `cargo build --release`
+- Run server: `nohup target/x86_64-unknown-linux-gnu/release/xterm-backend > server.log 2>&1 &`
+- Run tests: `python3 scripts/all_tests.py all` (recommended CI target)
+- Quick WS check: `python3 scripts/test_ws_client.py`
+
+Conventions (must follow)
+- Keep all `unsafe` in `src/runtime/` only.
+- Logging: use `crate::server::log(b"...")` (no format macros). Use `itoa::Buffer` for numbers.
+- Error style: `Result<T, &'static str>` with short literal messages (e.g., `Err("fork")`).
+- Memory: prefer `page_alloc`/`page_free` for large buffers; functions operate on slices.
+- WebSocket: client frames MUST be masked (parser rejects unmasked). Server sends unmasked binary frames.
+
+Where to change things
+- Protocol logic: `src/net/ws/*` (handshake, frame parsing).
+- Bridge/IO: `src/server/bridge.rs` (epoll loop, buffer allocation).
+- Accept/reap logic: `src/server/mod.rs`.
+- Low-level/syscall changes: `src/runtime/*` and `src/sys/*` only.
+
+CI suggestion (minimal): run `cargo fmt -- --check`, `cargo clippy -- -D warnings`, `cargo build --release`, then `python3 scripts/all_tests.py all` on push/PR.
+
+If you want, I can add the GitHub Actions YAML implementing the CI steps above.
+````
 - LLDB/dev attach: `sudo sysctl -w kernel.yama.ptrace_scope=0` then attach to the relevant PID.
 
 ## Tests & CI guidance
