@@ -2,7 +2,6 @@
 #![no_main]
 
 mod r#loop;
-mod mem;
 mod net;
 mod pty;
 mod runtime;

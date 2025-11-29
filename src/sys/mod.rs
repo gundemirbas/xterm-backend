@@ -1,6 +1,5 @@
 pub type SysResult<T> = core::result::Result<T, isize>;
 
-pub mod checked;
 pub mod epoll;
 pub mod fs;
 pub mod mmap;
