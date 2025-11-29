@@ -27,7 +27,7 @@ This is a `no_std` Rust xterm backend using raw syscalls for HTTP server, WebSoc
 - `src/net/ws/crypto.rs`: In-tree SHA-1 and base64 implementations
 
 **I/O Bridge**
-- `src/loop/bridge.rs`: Epoll loop bridging WebSocket fd ↔ PTY master fd. Handles Ctrl-C detection (0x03 byte) by sending SIGINT to shell child
+- `src/server/bridge.rs`: Epoll loop bridging WebSocket fd ↔ PTY master fd. Handles Ctrl-C detection (0x03 byte) by sending SIGINT to shell child
 
 **System Calls**
 - `src/sys/*`: Safe syscall wrappers (net, fs, epoll, pty, mmap, signal) using runtime syscalls. No libc dependency
@@ -54,11 +54,7 @@ pkill -f xterm-backend
 ## Testing & Debugging
 
 **Test Scripts** (`scripts/`)
-- `test_ws_client.py`: Full WebSocket handshake + frame exchange test—use this first to reproduce issues deterministically
-- `test_ws_handshake.sh`: Quick handshake validation
-- `stress_ws_clients.py`: Concurrent connection stress test
-- `test_graceful_shutdown.sh`: SIGTERM/SIGINT handling
-- `test_reclaim_workers.py`: Worker reaping validation
+- `all_tests.py`: Consolidated Python test runner that builds/starts the server and runs handshake, ws client, stress, reclaim and graceful tests.
 
 **Debugging Patterns**
 1. Reproduce with `./scripts/test_ws_client.py` before testing in browser
