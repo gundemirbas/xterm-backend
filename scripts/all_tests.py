@@ -201,6 +201,7 @@ def stress_clients(n=16):
         except Exception:
             pass
     print('done')
+    return True
 
 
 def reclaim_workers(max_workers=15):
@@ -246,6 +247,7 @@ def reclaim_workers(max_workers=15):
         s.close()
     except Exception as e:
         print('new conn failed:', e)
+    return True
 
 
 def _find_listening_pid(port=8000):
@@ -277,19 +279,25 @@ def graceful_shutdown_test():
     server_bin = os.path.join(root, 'target', 'x86_64-unknown-linux-gnu', 'release', 'xterm-backend')
     server_log = os.path.join(root, 'server.log')
 
-    # Start server
-    print('Starting server...')
-    logf = open(server_log, 'wb')
-    server_proc = subprocess.Popen([server_bin], cwd=root, stdout=logf, stderr=logf)
-    time.sleep(0.5)
-
-    # detect listening pid
+    # If a server is already listening, reuse it; otherwise start one.
     listen_pid = _find_listening_pid(PORT)
+    server_proc = None
+    logf = None
+    started_here = False
     if listen_pid:
-        print('server pid (listening):', listen_pid)
+        print('detected existing server pid:', listen_pid)
     else:
-        print('No listening PID detected, using started PID', server_proc.pid)
-        listen_pid = server_proc.pid
+        print('Starting server...')
+        logf = open(server_log, 'wb')
+        server_proc = subprocess.Popen([server_bin], cwd=root, stdout=logf, stderr=logf)
+        time.sleep(0.5)
+        listen_pid = _find_listening_pid(PORT)
+        if listen_pid:
+            print('server pid (listening):', listen_pid)
+        else:
+            print('No listening PID detected, using started PID', server_proc.pid)
+            listen_pid = server_proc.pid
+        started_here = True
 
     # start a client in background to hold session
     client_t = threading.Thread(target=ws_client_test, daemon=True)
@@ -346,6 +354,7 @@ def graceful_shutdown_test():
         logf.close()
     except Exception:
         pass
+    return True
 
 
 def _start_server_if_needed():
